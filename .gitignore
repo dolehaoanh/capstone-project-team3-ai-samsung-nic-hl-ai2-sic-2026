@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.coverage
+htmlcov/
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
+.env
+.DS_Store

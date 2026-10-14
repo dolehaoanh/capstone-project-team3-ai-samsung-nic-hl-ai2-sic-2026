@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: vietnam-stock-forecasting
+Version: 0.1.0
+Summary: Leakage-safe, medium-term Vietnamese equity research MVP
+Requires-Python: >=3.11
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: numpy<3,>=2
+Requires-Dist: pandas<3,>=2.2
+Requires-Dist: pydantic<3,>=2.8
+Requires-Dist: scikit-learn<2,>=1.5
+Requires-Dist: uvicorn[standard]<1,>=0.30
+Provides-Extra: data
+Requires-Dist: vnstock<4,>=3.2; extra == "data"
+Provides-Extra: dev
+Requires-Dist: httpx<1,>=0.27; extra == "dev"
+Requires-Dist: pytest<9,>=8; extra == "dev"
+Requires-Dist: pytest-cov<6,>=5; extra == "dev"
