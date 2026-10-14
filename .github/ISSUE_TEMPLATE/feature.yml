@@ -1,0 +1,26 @@
+name: Feature
+description: Propose a scoped project feature or workstream task
+title: "[Feature]: "
+labels: ["feature"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: State the user or research outcome in measurable terms.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Contract and dependencies
+      description: List input/output schemas, upstream dependencies, and acceptance checks.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Explain the test, backtest, or demo evidence required.
+    validations:
+      required: true
