@@ -218,6 +218,11 @@ def fetch_vietnam_history(
     symbols_list = [s for s in symbols]
     if not symbols_list:
         raise ValueError("At least one symbol is required")
+    normalized_symbols: list[str] = []
+    for symbol in symbols_list:
+        if not symbol or symbol.strip() != symbol:
+            raise ValueError(f"Invalid symbol: {symbol!r}")
+        normalized_symbols.append(symbol.strip().upper())
 
     quote_fn = None
     vnstock_v3_cls = None
@@ -244,11 +249,7 @@ def fetch_vietnam_history(
         )
 
     frames: list[pd.DataFrame] = []
-    for symbol in symbols_list:
-        if not symbol or symbol.strip() != symbol:
-            raise ValueError(f"Invalid symbol: {symbol!r}")
-        clean_symbol = symbol.strip().upper()
-
+    for clean_symbol in normalized_symbols:
         if quote_fn is not None:
             history = quote_fn(symbol=clean_symbol, source=source).history(
                 start=start,
