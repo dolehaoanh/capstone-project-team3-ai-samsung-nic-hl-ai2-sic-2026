@@ -201,7 +201,6 @@ def test_cli_main_with_mock(tmp_path):
             "volume": [1000],
         }
     )
-
     class MockQuote:
         def __init__(self, symbol, source="VCI"):
             self.symbol = symbol
