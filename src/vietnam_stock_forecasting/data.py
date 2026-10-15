@@ -30,10 +30,24 @@ def validate_market_frame(frame: pd.DataFrame) -> None:
         raise ValueError(f"Market data is missing required columns: {sorted(missing)}")
     if frame.empty:
         raise ValueError("Market data must contain at least one row")
+    if not pd.api.types.is_datetime64_any_dtype(frame["date"]):
+        try:
+            parsed_dates = pd.to_datetime(frame["date"], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Market data contains invalid dates") from exc
+        frame["date"] = parsed_dates
+    if frame["date"].isna().any():
+        raise ValueError("Market data contains missing dates")
+    if frame["symbol"].isna().any() or (frame["symbol"].astype(str).str.strip() == "").any():
+        raise ValueError("Market data contains missing symbols")
+    if frame.duplicated(subset=["symbol", "date"]).any():
+        raise ValueError("Market data contains duplicate symbol/date rows")
     if frame[["open", "high", "low", "close", "volume"]].isna().any().any():
         raise ValueError("Market data contains missing numeric values")
     if (frame[["open", "high", "low", "close", "volume"]] < 0).any().any():
         raise ValueError("Market prices and volume cannot be negative")
+    if (frame["high"] < frame["low"]).any():
+        raise ValueError("Market high must be greater than or equal to low")
 
 
 def load_csv_snapshot(path: str | Path) -> MarketSnapshot:
