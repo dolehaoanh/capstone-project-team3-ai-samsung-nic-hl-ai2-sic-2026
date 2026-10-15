@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 import json
+import sys
+import types
 import pandas as pd
 import pytest
 
@@ -27,6 +29,12 @@ def _valid_row(**kwargs):
     }
     row.update(kwargs)
     return row
+
+
+def _mock_vnstock_module(quote_cls):
+    module = types.ModuleType("vnstock")
+    module.Quote = quote_cls
+    return module
 
 
 def test_missing_columns_are_reported():
@@ -168,7 +176,7 @@ def test_fetch_vietnam_history_offline_with_fixture_mock():
         def history(self, start, end):
             return mock_history.copy()
 
-    with patch("vnstock.Quote", MockQuote):
+    with patch.dict(sys.modules, {"vnstock": _mock_vnstock_module(MockQuote)}):
         snapshot = fetch_vietnam_history(["FPT"], start="2024-01-01", end="2024-01-05", source="VCI")
         assert len(snapshot.frame) == 2
         assert list(snapshot.frame.columns) == COLUMN_ORDER
@@ -209,7 +217,7 @@ def test_cli_main_with_mock(tmp_path):
             return mock_history.copy()
 
     out_csv = tmp_path / "cli_test.csv"
-    with patch("vnstock.Quote", MockQuote):
+    with patch.dict(sys.modules, {"vnstock": _mock_vnstock_module(MockQuote)}):
         code = cli_main(["--symbols", "FPT", "--start", "2024-01-01", "--end", "2024-01-05", "--output", str(out_csv)])
         assert code == 0
         assert out_csv.is_file()
