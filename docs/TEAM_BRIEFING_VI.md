@@ -6,6 +6,12 @@ Xây dựng ứng dụng web chạy local, giao diện tiếng Việt, hỗ tr�
 
 Đây là công cụ hỗ trợ nghiên cứu, không cam kết lợi nhuận. Không triển khai giao dịch tự động.
 
+## Hợp đồng chung đã chốt
+
+Đọc [`CONTRACTS_VI.md`](CONTRACTS_VI.md) trước khi code. Tài liệu này chốt data schema,
+feature/target, forecast contract và API request/response. Mỗi lane có thể làm bằng
+fixture/mock theo contract; không cần chờ lane khác hoàn thành.
+
 ## Cách cả nhóm làm việc song song
 
 1. Mỗi người nhận đúng Issue của mình và tạo branch riêng.

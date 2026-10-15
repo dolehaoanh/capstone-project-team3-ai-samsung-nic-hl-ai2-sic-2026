@@ -38,5 +38,6 @@ The repository is organized for five concurrent workstreams: data ingestion, fea
 
 - Quy trình branch, pull request và kiểm thử: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Briefing phân công bằng tiếng Việt: [`docs/TEAM_BRIEFING_VI.md`](docs/TEAM_BRIEFING_VI.md)
+- Hợp đồng data/feature/model/API: [`docs/CONTRACTS_VI.md`](docs/CONTRACTS_VI.md)
 - Tin nhắn kickoff để gửi vào Zalo: [`docs/ZALO_KICKOFF_VI.md`](docs/ZALO_KICKOFF_VI.md)
 - GitHub Project: [Vietnam Stock Forecasting MVP](https://github.com/users/dolehaoanh/projects/1)
