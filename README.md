@@ -27,10 +27,18 @@ Then open `http://127.0.0.1:8000/docs`.
 To explicitly refresh a cached snapshot from a free Vietnamese-market provider:
 
 ```bash
-python -m pip install -e ".[data]"
+python -m pip install --extra-index-url https://vnstocks.com/api/packages vnstock
+# Or install editable data extra:
+python -m pip install --extra-index-url https://vnstocks.com/api/packages -e ".[data]"
 ```
 
-The provider is intentionally optional: tests and inference remain offline and reproducible by default. Use `fetch_vietnam_history(...)` from `vietnam_stock_forecasting.data`, validate the result, and persist it with `write_csv_snapshot(...)`. Keep the retrieved date, provider, query range, and symbol list with the submitted dataset.
+Fetch and save a raw snapshot via CLI:
+
+```bash
+python -m vietnam_stock_forecasting.data --symbols VN30 --start 2024-01-01 --end 2024-06-30 --output data/raw/vn30_snapshot.csv
+```
+
+The provider is intentionally optional: tests and inference remain offline and reproducible by default. Use `fetch_vietnam_history(...)` from `vietnam_stock_forecasting.data`, validate the result, and persist it with `write_csv_snapshot(...)`. Keep the retrieved date, provider, query range, and symbol list with the submitted dataset in the sidecar `<name>.metadata.json`.
 
 The repository is organized for five concurrent workstreams: data ingestion, feature/leakage controls, modeling/evaluation, backend/UI, and integration/review. GitHub Projects, Issues, pull requests, CODEOWNERS, and Actions are the project-management system of record.
 
@@ -38,6 +46,7 @@ The repository is organized for five concurrent workstreams: data ingestion, fea
 
 - Quy trình branch, pull request và kiểm thử: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Briefing phân công bằng tiếng Việt: [`docs/TEAM_BRIEFING_VI.md`](docs/TEAM_BRIEFING_VI.md)
+- Tài liệu pipeline dữ liệu: [`docs/DATA_PIPELINE.md`](docs/DATA_PIPELINE.md)
 - Hợp đồng data/feature/model/API: [`docs/CONTRACTS_VI.md`](docs/CONTRACTS_VI.md)
 - Tin nhắn kickoff để gửi vào Zalo: [`docs/ZALO_KICKOFF_VI.md`](docs/ZALO_KICKOFF_VI.md)
 - GitHub Project: [Vietnam Stock Forecasting MVP](https://github.com/users/dolehaoanh/projects/1)

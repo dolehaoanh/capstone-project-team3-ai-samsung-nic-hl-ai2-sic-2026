@@ -1,0 +1,10 @@
+{
+  "source": "synthetic_vn30_sample",
+  "retrieved_at": "2024-01-01T00:00:00Z",
+  "start_date": "2024-01-01",
+  "end_date": "2024-02-20",
+  "symbols": [
+    "AAA"
+  ],
+  "row_count": 52
+}

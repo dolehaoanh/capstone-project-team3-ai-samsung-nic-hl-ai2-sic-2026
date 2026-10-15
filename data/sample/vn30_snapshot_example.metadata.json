@@ -1,0 +1,19 @@
+{
+  "source": "vnstock:VCI",
+  "retrieved_at": "2026-10-15T06:50:12.791246+00:00",
+  "start_date": "2024-01-02",
+  "end_date": "2024-06-28",
+  "symbols": [
+    "ACB",
+    "BID",
+    "CTG",
+    "FPT",
+    "HPG",
+    "MBB",
+    "MSN",
+    "MWG",
+    "TCB",
+    "VCB"
+  ],
+  "row_count": 1200
+}
