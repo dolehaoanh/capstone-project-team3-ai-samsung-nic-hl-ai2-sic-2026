@@ -30,7 +30,7 @@ DISCLAIMER = (
     "Forecasts are uncertain and do not guarantee returns."
 )
 HORIZON_DAYS = 20
-DEFAULT_SNAPSHOT_NAME = "vn30_snapshot_example.csv"
+DEFAULT_SNAPSHOT_NAME = "vn30_snapshot.csv"
 DEFAULT_STALE_AFTER_DAYS = 7
 MAX_LISTED_SYMBOLS = 10
 # Vietnam has observed UTC+7 with no daylight saving since 1975, so a fixed offset is
@@ -153,8 +153,10 @@ def _data_age_warning(data_end: date | None) -> str | None:
     # the age by one day for exactly the users this tool is built for.
     age_days = (datetime.now(VN_TIMEZONE).date() - data_end).days
     if age_days < 0:
-        # A session that has not happened yet cannot have OHLCV data: either the host
-        # clock is wrong or the snapshot is not real market data. Never stay silent.
+        # A session that has not happened yet cannot have OHLCV data. validate_market_frame
+        # already rejects future rows in the CSV, but `end_date` comes from the metadata
+        # sidecar as written, so a sidecar that disagrees with its CSV still reaches here.
+        # Never stay silent about it.
         return (
             f"Snapshot chứa dữ liệu đến ngày {data_end.strftime('%d/%m/%Y')}, tức là trong "
             f"tương lai ({-age_days} ngày). Dữ liệu này không hợp lệ — kiểm tra lại nguồn "
