@@ -97,6 +97,13 @@ def test_duplicate_symbol_and_date_raises():
         validate_market_frame(data)
 
 
+def test_future_dates_rejected():
+    future_date = (pd.Timestamp.now() + pd.Timedelta(5, unit="D")).strftime("%Y-%m-%d")
+    data = pd.DataFrame([_valid_row(date=future_date)])
+    with pytest.raises(ValueError, match="future dates"):
+        validate_market_frame(data)
+
+
 def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     frame = pd.DataFrame(
         [
@@ -111,6 +118,8 @@ def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     assert snapshot.start_date == "2024-01-02"
     assert snapshot.end_date == "2024-01-03"
     assert snapshot.symbols == ("AAA", "BBB")
+    assert snapshot.frequency == "1D"
+    assert snapshot.adjusted is True
 
     output_csv = tmp_path / "nested" / "snapshot.csv"
     output = write_csv_snapshot(snapshot, output_csv)
@@ -126,6 +135,8 @@ def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     assert meta["end_date"] == "2024-01-03"
     assert meta["symbols"] == ["AAA", "BBB"]
     assert meta["row_count"] == 3
+    assert meta["frequency"] == "1D"
+    assert meta["adjusted"] is True
 
     # Load back using load_csv_snapshot
     loaded = load_csv_snapshot(output)
@@ -133,6 +144,8 @@ def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     assert loaded.symbols == ("AAA", "BBB")
     assert loaded.start_date == "2024-01-02"
     assert loaded.end_date == "2024-01-03"
+    assert loaded.frequency == "1D"
+    assert loaded.adjusted is True
     assert len(loaded.frame) == 3
 
 

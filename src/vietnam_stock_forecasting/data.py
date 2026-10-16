@@ -71,6 +71,8 @@ class MarketSnapshot:
     start_date: str | None = None
     end_date: str | None = None
     symbols: tuple[str, ...] | None = None
+    frequency: str = "1D"
+    adjusted: bool = True
 
     def __post_init__(self) -> None:
         if not self.frame.empty and "date" in self.frame.columns:
@@ -91,6 +93,8 @@ class MarketSnapshot:
             "end_date": self.end_date,
             "symbols": list(self.symbols or ()),
             "row_count": int(len(self.frame)),
+            "frequency": self.frequency,
+            "adjusted": self.adjusted,
         }
 
 
@@ -107,6 +111,9 @@ def validate_market_frame(frame: pd.DataFrame) -> None:
     parsed_dates = pd.to_datetime(frame["date"], errors="coerce")
     if parsed_dates.isna().any():
         raise ValueError("Market data contains invalid date values")
+    today = pd.Timestamp.now(tz=None).date()
+    if (parsed_dates.dt.date > today).any():
+        raise ValueError("Market data contains future dates")
 
     # Validate symbols
     if frame["symbol"].isna().any() or frame["symbol"].astype(str).str.strip().eq("").any():
@@ -155,6 +162,8 @@ def load_csv_snapshot(path: str | Path) -> MarketSnapshot:
             end_date = meta.get("end_date")
             raw_symbols = meta.get("symbols")
             symbols = tuple(raw_symbols) if raw_symbols is not None else None
+            frequency = str(meta.get("frequency", "1D"))
+            adjusted = bool(meta.get("adjusted", True))
             return MarketSnapshot(
                 frame=frame,
                 source=source,
@@ -162,6 +171,8 @@ def load_csv_snapshot(path: str | Path) -> MarketSnapshot:
                 start_date=start_date,
                 end_date=end_date,
                 symbols=symbols,
+                frequency=frequency,
+                adjusted=adjusted,
             )
         except Exception:
             pass
@@ -248,18 +259,37 @@ def fetch_vietnam_history(
             "Install it with: pip install --extra-index-url https://vnstocks.com/api/packages vnstock"
         )
 
+    import time
+
     frames: list[pd.DataFrame] = []
-    for clean_symbol in normalized_symbols:
-        if quote_fn is not None:
-            history = quote_fn(symbol=clean_symbol, source=source).history(
-                start=start,
-                end=end,
-            )
-        else:
-            history = vnstock_v3_cls().stock(symbol=clean_symbol, source=source).quote.history(
-                start=start,
-                end=end,
-            )
+    is_real_vnstock = (
+        getattr(quote_fn, "__module__", "").startswith("vnstock")
+        or getattr(vnstock_v3_cls, "__module__", "").startswith("vnstock")
+    )
+    for idx, clean_symbol in enumerate(normalized_symbols):
+        if idx > 0 and is_real_vnstock:
+            time.sleep(6.5)
+
+        history = None
+        for attempt in range(4):
+            try:
+                if quote_fn is not None:
+                    history = quote_fn(symbol=clean_symbol, source=source).history(
+                        start=start,
+                        end=end,
+                    )
+                else:
+                    history = vnstock_v3_cls().stock(symbol=clean_symbol, source=source).quote.history(
+                        start=start,
+                        end=end,
+                    )
+                break
+            except Exception as exc:
+                exc_msg = str(exc).lower()
+                if attempt < 3 and any(k in exc_msg for k in ["hạn mức", "rate", "entitlement", "circuit", "429"]):
+                    time.sleep(62)
+                    continue
+                raise
 
         if history is None or history.empty:
             raise ValueError(f"No market history returned for symbol {clean_symbol}")
