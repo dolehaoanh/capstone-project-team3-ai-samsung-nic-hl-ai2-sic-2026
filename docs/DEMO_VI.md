@@ -20,7 +20,7 @@ Kiểm tra trước khi demo:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Kết quả mong đợi: **59 passed** (39 test của lane App trong `tests/test_api.py`, còn
+Kết quả mong đợi: **60 passed** (40 test của lane App trong `tests/test_api.py`, còn
 lại của các lane Data, Features, Modeling). Có một warning từ `starlette`
 (`Using httpx with starlette.testclient is deprecated`) — đến từ thư viện, không phải
 code dự án, bỏ qua được.
@@ -264,9 +264,17 @@ Nói ra chủ động thì là sự trung thực khoa học; để giám khảo 
    14:02 giờ VN ngày 16/10/2026 (`retrieved_at` 07:02 UTC), trước giờ HOSE đóng cửa
    (ATC kết thúc 14:45). Dòng ngày 16/10 của cả 30 mã vì vậy là giá giữa phiên, không
    phải giá đóng cửa. Thuộc lane Data (Issue #4).
-5. **`volatility_20d` tính rolling xuyên ranh giới mã** với snapshot nhiều mã: khoảng 19
-   dòng đầu của mã thứ hai trở đi dùng dữ liệu của mã liền trước. Với 30 mã, 29 mã bị
-   ảnh hưởng. Thuộc Issue #3, đã ghi thành quy tắc ở `CONTRACTS_VI.md` §2.
+5. **Mô hình gần như không có khả năng dự báo ngoài mẫu trên snapshot hiện tại.** Chạy
+   `walk_forward_evaluate` trên 30 mã: tham số mặc định cho **AUC 0,534, accuracy
+   50,9%**; với `min_train_rows=1000, test_window=300` thì AUC 0,484, accuracy 47,8%.
+   Tức là xấp xỉ đoán ngẫu nhiên, dù walk-forward còn thiếu embargo (giới hạn 2) nên lẽ
+   ra kết quả còn được "ưu ái". Các con số trên dashboard là đầu ra của baseline,
+   **không phải tín hiệu đã được kiểm chứng**. Nếu bị hỏi "mô hình chính xác bao nhiêu",
+   đây là câu trả lời thật; đừng đưa accuracy in-sample.
+   Các chỉ số lợi nhuận của hàm này **không được trích dẫn** cho tới khi lane Modeling
+   (Issue #5) sửa: chúng nhân dồn lợi nhuận 20 phiên chồng lấn nhau của mọi mã, nên với
+   tham số mặc định `strategy_return` ra **+438.270%** trong khi `buy_and_hold_return`
+   ra −100%. Lợi nhuận mua và giữ thực tế của rổ trong năm có trung vị −8,4%.
 6. **`target_positive` gán `0` cho phiên chưa biết tương lai** thay vì `NA`. Hiện chưa
    gây sai số vì các hàm train đều lọc thêm `forward_return`, nhưng là bẫy chờ sẵn.
    Xem `CONTRACTS_VI.md` §2.1, thuộc Issue #3.
@@ -292,6 +300,8 @@ Nói ra chủ động thì là sự trung thực khoa học; để giám khảo 
 - Không trình bày PNJ đứng đầu như một gợi ý "bắt đáy". Đó là mô hình tuyến tính ngoại
   suy từ 38 dòng dữ liệu, đi kèm mức biến động cao nhất rổ — xem Bước 3.
 - Không trình bày số trên dashboard như kết quả backtest. Đó là hai thứ khác nhau.
+- Không nói mô hình "dự báo đúng" hay "có độ chính xác cao": AUC ngoài mẫu hiện chỉ
+  khoảng 0,48–0,53 — xem giới hạn 5.
 
 Ràng buộc đầy đủ về cách diễn giải nằm ở [`CONTRACTS_VI.md` §3.1](CONTRACTS_VI.md).
 

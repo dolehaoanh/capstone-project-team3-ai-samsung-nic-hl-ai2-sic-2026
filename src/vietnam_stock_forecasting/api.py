@@ -25,9 +25,11 @@ from .model import BaselineModel
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Vietnam Stock Forecasting MVP", version="0.1.0")
+# Shown verbatim on the Vietnamese dashboard, so it is user-facing text and must be in
+# Vietnamese like every other message (docs/CONTRACTS_VI.md section 4.1).
 DISCLAIMER = (
-    "This is educational decision-support software, not personalized financial advice. "
-    "Forecasts are uncertain and do not guarantee returns."
+    "Đây là công cụ nghiên cứu hỗ trợ ra quyết định, không phải tư vấn đầu tư cá nhân. "
+    "Dự báo luôn có sai số và không cam kết lợi nhuận."
 )
 HORIZON_DAYS = 20
 DEFAULT_SNAPSHOT_NAME = "vn30_snapshot.csv"

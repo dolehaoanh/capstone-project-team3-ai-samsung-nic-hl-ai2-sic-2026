@@ -372,6 +372,18 @@ def test_dashboard_labels_confidence_without_promising_profit():
     assert "Bằng chứng" in page
 
 
+def test_forecast_disclaimer_is_vietnamese_and_promises_no_profit(snapshot_env):
+    # The dashboard renders `disclaimer` verbatim next to the table, so an English
+    # string here would be the one English sentence on a Vietnamese page.
+    snapshot_env()
+
+    disclaimer = client.get("/forecasts").json()["disclaimer"]
+
+    assert "không phải tư vấn đầu tư" in disclaimer
+    assert "không cam kết lợi nhuận" in disclaimer
+    assert "advice" not in disclaimer.lower()
+
+
 def _forecast(symbol: str, *, probability: float, expected_return: float, volatility: float):
     return Forecast(
         symbol=symbol,

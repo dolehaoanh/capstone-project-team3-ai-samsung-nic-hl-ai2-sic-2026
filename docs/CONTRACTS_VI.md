@@ -128,11 +128,28 @@ Các dòng thiếu lịch sử hoặc chưa có `t+20` phải bị loại khỏi
 được tràn qua ranh giới mã. Mỗi feature rolling phải có test với fixture **ít nhất 2
 symbol**, khẳng định giá của mã này không ảnh hưởng feature của mã khác.
 
-Quy tắc này được thêm sau khi rà soát `volatility_20d`: phép `.rolling(20)` được áp lên
-series đã nối của mọi mã, nên với mã thứ hai trở đi, khoảng 19 dòng đầu được tính bằng
-dữ liệu của mã liền trước. Điểm nguy hiểm là các giá trị đó **không phải `NaN`**, nên
-chúng không bị `dropna` loại và lặng lẽ vào tập huấn luyện. Toàn bộ fixture và snapshot
-mặc định hiện tại chỉ có một mã nên không test nào phát hiện được. Theo dõi ở Issue #3.
+Quy tắc này được thêm sau khi rà soát `volatility_20d`, dòng duy nhất áp `.rolling(20)`
+lên series đã nối của mọi mã thay vì `transform` theo từng mã.
+
+**Đính chính (16/10):** bản trước của mục này viết rằng cửa sổ rolling tràn qua ranh giới
+mã và tạo giá trị sai không phải `NaN`. **Kết luận đó sai.** Kiểm trên
+`vn30_snapshot.csv` (30 mã, 7.470 dòng), `volatility_20d` khớp 100% với bản tính riêng
+từng mã: dòng đầu của mỗi mã có `pct_change` là `NaN`, và `rolling(20)` mặc định trả
+`NaN` cho mọi cửa sổ chứa nó, nên cửa sổ không thể chạm sang mã trước. Hai rủi ro thật:
+
+1. **Đúng nhờ rào chắn ngầm.** Chỉ cần thêm `min_periods` (ví dụ `rolling(20,
+   min_periods=2)`) hoặc `fillna` trước `rolling`, 551 dòng sẽ lẫn dữ liệu của mã liền
+   trước mà không báo lỗi.
+2. **Gán sai dòng khi đầu vào chưa sắp theo `(symbol, date)` và có index 0..n−1.**
+   `.reset_index(level=0, drop=True)` biến index thành 0..n−1 theo thứ tự *đã sắp*, rồi
+   pandas gán theo nhãn vào `frame` mang index *gốc*. Đầu vào sắp theo `(date, symbol)`
+   với index reset: **7.409/7.470 dòng nhận `volatility_20d` của dòng khác**. Đường đi
+   của API an toàn vì `load_csv_snapshot` luôn sắp `(symbol, date)` và reset index,
+   nhưng `build_features` là hàm dùng chung.
+
+Đề xuất cho lane Features (Issue #3): tính bằng
+`grouped["close"].transform(lambda s: s.pct_change().rolling(20).std())` như các feature
+khác, kèm test 2 mã với đầu vào **chưa sắp xếp**.
 
 Các feature mới như RSI, MACD, VN-Index hoặc sector benchmark được phép bổ sung,
 nhưng phải cập nhật feature dictionary và leakage test; không đổi ý nghĩa feature MVP.
