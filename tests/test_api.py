@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from vietnam_stock_forecasting.api import _cached_forecasts, _rank_for_profile, app
+from vietnam_stock_forecasting.api import VN_TIMEZONE, _cached_forecasts, _rank_for_profile, app
 from vietnam_stock_forecasting.contracts import Forecast, RiskProfile
 
 
@@ -232,13 +232,31 @@ def test_old_snapshot_warns_without_failing(snapshot_env):
     assert any("dữ liệu nghiên cứu offline" in text for text in payload["warnings"])
 
 
-def test_future_dated_snapshot_is_reported_as_invalid(snapshot_env):
+def test_future_dated_rows_are_rejected_as_unreadable(snapshot_env):
     # OHLCV for a session that has not happened yet means a broken source or a wrong
-    # host clock. Silence would be worse than a stale-data notice.
+    # host clock. validate_market_frame rejects it, so the API must answer 503 in
+    # Vietnamese rather than leak the traceback.
     snapshot_env(end=(date.today() + timedelta(days=60)).isoformat())
+
+    response = client.get("/forecasts")
+
+    assert response.status_code == 503
+    assert "snapshot" in response.json()["detail"].lower()
+
+
+def test_sidecar_claiming_a_future_end_date_is_reported(snapshot_env, tmp_path):
+    # The CSV itself is valid, but `end_date` is read from the sidecar as written, so a
+    # sidecar that disagrees with its CSV must still surface instead of passing silently.
+    snapshot_env()
+    future = (date.today() + timedelta(days=60)).isoformat()
+    (tmp_path / "snapshot.metadata.json").write_text(
+        json.dumps({"source": "vnstock:VCI", "end_date": future}),
+        encoding="utf-8",
+    )
 
     payload = client.get("/forecasts").json()
 
+    assert payload["forecasts"]
     assert any("tương lai" in text for text in payload["warnings"])
 
 
@@ -273,12 +291,17 @@ def test_fresh_snapshot_has_no_age_warning(snapshot_env):
 
 
 def test_stale_threshold_is_configurable(snapshot_env, monkeypatch):
-    snapshot_env(end=date.today().isoformat())
-    monkeypatch.setenv("SNAPSHOT_STALE_DAYS", "0")
+    # The API measures age on the Vietnamese date while the fixture is built from the
+    # host date; on a UTC runner those differ by a day after 17:00 UTC. Ending 3 host
+    # days back gives an age of 3 or 4, so thresholds of 2 and 10 hold at any hour.
+    snapshot_env(end=(date.today() - timedelta(days=3)).isoformat())
 
-    payload = client.get("/forecasts").json()
+    monkeypatch.setenv("SNAPSHOT_STALE_DAYS", "2")
+    _cached_forecasts.cache_clear()
+    assert any("cũ" in text for text in client.get("/forecasts").json()["warnings"])
 
-    assert not payload["warnings"], "a snapshot ending today is never older than 0 days"
+    monkeypatch.setenv("SNAPSHOT_STALE_DAYS", "10")
+    assert not client.get("/forecasts").json()["warnings"]
 
 
 def test_single_class_snapshot_warns_that_the_model_cannot_separate(snapshot_env):
@@ -513,11 +536,15 @@ def test_cache_is_invalidated_when_the_snapshot_file_changes(snapshot_env, tmp_p
 
 
 def test_warnings_are_recomputed_outside_the_cache(snapshot_env, monkeypatch):
-    snapshot_env(end=(date.today() - timedelta(days=5)).isoformat())
+    end = date.today() - timedelta(days=5)
+    snapshot_env(end=end.isoformat())
     assert client.get("/forecasts").json()["warnings"] == [], "5 days is inside the 7-day default"
 
     # The snapshot file is untouched, so a warning now can only come from outside the
     # cached result — which is what keeps the reported data age fresh on a long-running app.
     monkeypatch.setenv("SNAPSHOT_STALE_DAYS", "0")
 
-    assert any("cũ 5 ngày" in text for text in client.get("/forecasts").json()["warnings"])
+    # Age is counted on the Vietnamese date, which runs a day ahead of a UTC host after
+    # 17:00 UTC, so derive the expected figure the same way instead of hard-coding 5.
+    age = (datetime.now(VN_TIMEZONE).date() - end).days
+    assert any(f"cũ {age} ngày" in text for text in client.get("/forecasts").json()["warnings"])

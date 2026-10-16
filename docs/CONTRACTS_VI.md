@@ -26,8 +26,8 @@ File snapshot CSV bắt buộc có đúng các cột logic sau:
 Snapshot phải được sắp xếp theo `symbol`, sau đó `date`. Không ghi index vào CSV.
 
 **Đơn vị giá:** theo nguồn dữ liệu. Với `vnstock:VCI`, giá là **nghìn VND** — trong
-`vn30_snapshot_example.csv`, `close` của FPT nằm trong khoảng `62.15`–`103.43`, tức
-62.150–103.430 đồng. Mọi chỗ hiển thị giá tuyệt đối trên UI hoặc báo cáo phải ghi rõ
+`vn30_snapshot.csv`, `close` của FPT nằm trong khoảng `56.3`–`95.14`, tức
+56.300–95.140 đồng. Mọi chỗ hiển thị giá tuyệt đối trên UI hoặc báo cáo phải ghi rõ
 đơn vị; các cột tỷ lệ phần trăm không bị ảnh hưởng.
 
 **Chuẩn hóa `symbol`:** quy tắc viết hoa thuộc trách nhiệm lane Data khi ingest.
@@ -44,51 +44,53 @@ provenance vào `MarketSnapshot`.
 ```json
 {
   "source": "vnstock:VCI",
-  "retrieved_at": "2026-10-15T06:50:12.791246+00:00",
-  "start_date": "2024-01-02",
-  "end_date": "2024-06-28",
-  "symbols": ["ACB", "BID", "CTG"],
-  "row_count": 1200,
-  "frequency": "1d",
-  "adjusted": false
+  "retrieved_at": "2026-10-16T07:02:47.615135+00:00",
+  "start_date": "2025-10-16",
+  "end_date": "2026-10-16",
+  "symbols": ["ACB", "BCM", "BID"],
+  "row_count": 7470,
+  "frequency": "1D",
+  "adjusted": true
 }
 ```
 
-Sáu trường đầu là shape **đang được code sinh ra** (`MarketSnapshot.metadata_dict()`).
-Bản tài liệu trước ghi `start`/`end` — đã sửa theo code.
+Đây là shape **đang được code sinh ra** (`MarketSnapshot.metadata_dict()`), trích từ
+`vn30_snapshot.metadata.json` (rút gọn `symbols`). Bản tài liệu đầu tiên ghi
+`start`/`end` — đã sửa theo code.
 
-`row_count` là **số dòng dữ liệu, không tính dòng header**. Hiện
-`vn30_sample.metadata.json` ghi `52` trong khi file có 51 dòng dữ liệu; cần lane Data
-sửa lại, vì metadata là provenance của bài nộp.
+`row_count` là **số dòng dữ liệu, không tính dòng header**.
 
-`frequency` và `adjusted` **chưa được code ghi**, cần lane Data bổ sung **[CHỜ CHỐT]**.
+`frequency` và `adjusted` được lane Data bổ sung vào sidecar (PR #10, chốt Q7).
 `adjusted` là trường quan trọng về nghiệp vụ, không phải trang trí: giá chưa điều chỉnh
 chia tách/cổ tức sẽ tạo `forward_return` sai lệch lớn (một mã chia tách 1:2 cho ra
-−50% giả), làm nhiễu cả model và backtest.
+−50% giả), làm nhiễu cả model và backtest. Kiểm tra trên `vn30_snapshot.csv`: không mã
+nào có biến động một phiên vượt biên độ ±7% của HOSE, phù hợp với `adjusted: true`.
 
-Giá trị trong `vn30_snapshot_example.csv` thấp hơn đáng kể giá niêm yết danh nghĩa cùng
-kỳ (ví dụ ACB `14.78`–`17.93` trong nửa đầu 2024), nên chuỗi này **có dấu hiệu đã được
-điều chỉnh**. Lane Data cần xác nhận và ghi đúng `adjusted`, thay vì để lane khác suy
-đoán từ độ lớn của giá.
+**Lưu ý thời điểm lấy dữ liệu.** `retrieved_at` của snapshot hiện tại là 07:02 UTC, tức
+14:02 giờ VN — trước khi HOSE đóng cửa (ATC kết thúc 14:45). Dòng của phiên ngày
+`end_date` vì vậy là giá **giữa phiên**, không phải giá đóng cửa. Snapshot dùng để
+huấn luyện hoặc commit nên được lấy sau khi phiên đóng cửa, hoặc bỏ phiên chưa đóng —
+đề nghị lane Data xử lý (Issue #4).
 
 Không commit dữ liệu cá nhân, API key hoặc dữ liệu không rõ giấy phép.
 
 ### 1.2. Snapshot of record cho demo
 
-**[CHỜ CHỐT]** — xem Q1 ở §6.
+**Đã chốt (Q1, PR #10):** snapshot of record là **`data/sample/vn30_snapshot.csv`**,
+giữ nguyên `.gitignore`. Đây là snapshot mặc định của API.
 
-`.gitignore` đang chặn `data/raw/*` và `data/processed/*`, trong khi CLI lane Data mặc
-định ghi ra `data/raw/vn30_snapshot.csv`. Hệ quả: **snapshot VN30 thật không bao giờ
-được commit**, chỉ `data/sample/` có dữ liệu.
+`.gitignore` chặn `data/raw/*` và `data/processed/*` — hai thư mục nháp — nên snapshot
+dùng cho demo và data card phải nằm trong `data/sample/`.
 
 | File hiện có | Số mã | Số dòng | Khoảng dữ liệu | `source` |
 |---|---|---|---|---|
+| `data/sample/vn30_snapshot.csv` | 30/30 | 7.470 (249 phiên/mã) | 2025-10-16 → 2026-10-16 | `vnstock:VCI` |
+| `data/sample/vn30_snapshot_example.csv` | 30/30 | 7.470 | như trên | `vnstock:VCI` |
 | `data/sample/vn30_sample.csv` | 1 (`AAA`, dữ liệu tổng hợp) | 51 | 2024-01-01 → 2024-02-20 | `synthetic_vn30_sample` |
-| `data/sample/vn30_snapshot_example.csv` | 10/30 | 1.200 | 2024-01-02 → 2024-06-28 | `vnstock:VCI` |
 
-Đề xuất: lane Data commit **một** snapshot VN30 đủ 30 mã vào `data/sample/` kèm sidecar
-metadata, và file đó là snapshot of record cho demo lẫn test. Đặt tên không chứa
-`sample`/`example`, vì đây là dataset đi vào data card của bài nộp.
+`vn30_snapshot_example.csv` hiện là **bản sao giống hệt từng byte** của
+`vn30_snapshot.csv`. Nên xóa hoặc giữ lại làm fixture cố định, để tránh hai file có
+cùng vai trò trôi dần khỏi nhau — đề nghị lane Data quyết.
 
 Không thể dùng `vn30_sample.csv` làm snapshot of record: file chỉ có một mã với giá
 tăng gần như đơn điệu, nên `target_positive` chỉ còn một lớp, `BaselineModel` rơi vào
@@ -96,12 +98,12 @@ nhánh `DummyClassifier(strategy="prior")`, và dashboard hiển thị xác su�
 mã. Kết quả đó vô nghĩa về mặt nghiên cứu và trái quy tắc diễn giải ở
 [§3.1](#31-quy-tắc-hiển-thị-và-diễn-giải).
 
-`vn30_snapshot_example.csv` dùng tạm được (10 mã, giá thật, có đủ hai lớp kết quả) nên
-lane App không bị chặn trong lúc chờ Q1, nhưng nó chỉ có 120 phiên/mã. Sau khi trừ 20
-phiên warmup rolling và 20 phiên cuối không có `forward_return`, mỗi mã chỉ còn khoảng
-80 dòng dùng được — đủ để chạy demo, không đủ để backtest có ý nghĩa thống kê. Vì vậy
-bản 30 mã nên có **ít nhất 3 năm** lịch sử và bao gồm cả giai đoạn thị trường giảm, để
-`target_positive` không bị lệch về một lớp.
+Snapshot of record có **1 năm** lịch sử (249 phiên/mã). Sau khi trừ 20 phiên warmup
+rolling và 20 phiên cuối không có `forward_return`, mỗi mã còn khoảng 209 dòng dùng
+được, tổng 6.270 dòng huấn luyện. Đủ để chạy demo và đã có cả hai lớp kết quả (45,6%
+nhãn tăng), nhưng còn mỏng cho backtest: đề xuất ban đầu là **ít nhất 3 năm**, bao gồm
+cả giai đoạn thị trường giảm. Nếu lane Modeling cần walk-forward có ý nghĩa thống kê,
+đây là điểm cần mở rộng trước.
 
 ## 2. Feature và target
 
@@ -294,8 +296,8 @@ Briefing §4 yêu cầu có trạng thái "snapshot cũ" nhưng chưa có địn
 
 - **Tuổi dữ liệu đo theo `data_end`**, không theo `snapshot_retrieved_at`. Lý do:
   `retrieved_at` chỉ cho biết lúc nào ta tải file, không cho biết dữ liệu mới tới đâu.
-  `vn30_snapshot_example.metadata.json` có `retrieved_at` là 2026-10-15 nhưng dữ liệu
-  dừng ở 2024-06-28 — chênh nhau khoảng 28 tháng.
+  Bản `vn30_snapshot_example` trước PR #10 từng có `retrieved_at` là 2026-10-15 nhưng
+  dữ liệu dừng ở 2024-06-28 — chênh nhau khoảng 28 tháng.
 - **Luôn hiển thị `data_end` và tuổi dữ liệu** trên dashboard, ở mọi trường hợp, với
   cách diễn đạt trung tính.
 - Khi tuổi dữ liệu vượt **7 ngày**: vẫn trả `200`, thêm một chuỗi vào `warnings`, UI
@@ -307,8 +309,10 @@ Briefing §4 yêu cầu có trạng thái "snapshot cũ" nhưng chưa có địn
 
 - Nếu `data_end` nằm trong **tương lai**, đó không phải dữ liệu cũ mà là dữ liệu **không
   hợp lệ** (phiên chưa xảy ra thì không thể có OHLCV): phải cảnh báo riêng, không được
-  im lặng. Đúng ra `validate_market_frame` nên chặn ngày tương lai ngay từ tầng dữ liệu
-  — đề nghị lane Data bổ sung (Issue #4).
+  im lặng. Từ PR #10, `validate_market_frame` chặn dòng có ngày tương lai ngay từ tầng
+  dữ liệu, nên API trả `503`. Cảnh báo ở tầng App vẫn được giữ cho trường hợp CSV hợp
+  lệ nhưng **sidecar** ghi `end_date` tương lai: `load_csv_snapshot` đọc `end_date` từ
+  sidecar mà không đối chiếu với CSV.
 
 `warnings` còn chứa một cảnh báo thứ hai, độc lập với tuổi dữ liệu: khi tập huấn luyện
 chỉ có **một lớp kết quả**, `BaselineModel` rơi vào `DummyClassifier(strategy="prior")`
@@ -452,12 +456,12 @@ Tổng hợp các mục **[CHỜ CHỐT]**.
 
 | # | Câu hỏi | Đề xuất mặc định | Nếu không chốt |
 |---|---|---|---|
-| Q1 | Snapshot of record cho demo là file nào? `.gitignore` chặn `data/raw/` nên snapshot thật không vào repo ([§1.2](#12-snapshot-of-record-cho-demo)) | Giữ nguyên `.gitignore`; lane Data commit snapshot VN30 đủ 30 mã, ≥3 năm, vào `data/sample/` với tên không chứa `sample`/`example` | Bài nộp không có dữ liệu để chạy lại, hoặc demo chạy trên 1 mã tổng hợp và hiện 100% cho mọi mã |
+| Q1 | Snapshot of record cho demo là file nào? ([§1.2](#12-snapshot-of-record-cho-demo)) | **Đã chốt (PR #10):** `data/sample/vn30_snapshot.csv`, 30 mã, giữ nguyên `.gitignore`. Còn mở: độ dài lịch sử (hiện 1 năm, đề xuất ≥3 năm) | — |
 | Q2 | Ngưỡng và cách đo tuổi dữ liệu ([§4.2](#42-quy-tắc-tuổi-dữ-liệu)) | Theo `data_end`, ngưỡng 7 ngày, luôn hiển thị tuổi, thông báo giải thích thay vì báo động | Không có trạng thái này, hoặc dải cảnh báo đọc như sự cố giữa buổi demo |
-| Q3 | `mode=online` giữ `501` hay bật thật, và ai nối? | Giữ `501` + UI giải thích | Lane App và lane Data chờ nhau |
+| Q3 | `mode=online` giữ `501` hay bật thật, và ai nối? | **Hướng đã chốt (16/10):** dùng dữ liệu mới nhất từ sàn — app đọc snapshot ngay, cập nhật ngầm trong nền khi sang ngày mới. Còn mở: file đích của lần cập nhật ngầm, và `mode=online` giữ `501` hay bỏ | Lane App và lane Data chờ nhau |
 | Q4 | Ai định nghĩa tiêu chí risk profile ([§4.3](#43-ngữ-nghĩa-shortlist))? | Lane Modeling đưa ngưỡng, lane App render | Hai lane đưa ra hai định nghĩa khác nhau |
 | Q5 | Có đổi contract `/recommendations` để trả điểm/lý do từng mã? | Không đổi trong MVP | Lane App làm xong rồi phải sửa lại |
 | Q6 | So sánh benchmark và lãi suất tiết kiệm có trong MVP? README hứa, Briefing không giao lane nào | Không làm trong MVP; buy-and-hold để lane Modeling báo cáo | Rơi mặc định vào lane App ở phút cuối |
-| Q7 | Bổ sung `frequency` và `adjusted` vào metadata sidecar ([§1.1](#11-metadata-sidecar))? | Lane Data bổ sung, mặc định `adjusted: false` | `forward_return` sai ở mã chia tách/trả cổ tức mà không ai biết |
+| Q7 | Bổ sung `frequency` và `adjusted` vào metadata sidecar ([§1.1](#11-metadata-sidecar))? | **Đã chốt (PR #10):** lane Data đã bổ sung, snapshot hiện tại ghi `adjusted: true` | — |
 | Q8 | `confidence` nằm ở `api.py` hay `model.py` ([§3.1](#31-quy-tắc-hiển-thị-và-diễn-giải))? | Giữ `api.py` cho MVP, ghi rõ là tạm | Hai lane cùng sửa `api.py` |
 | Q9 | Thêm 5 trường provenance optional vào `ForecastResponse` ([§4](#get-forecastsmodesnapshot))? | Thêm, vì dashboard đang hiển thị sai nhãn "Nguồn" và PR template yêu cầu giữ provenance | Không có cách nào hiển thị nguồn dữ liệu đúng, hoặc phải thêm endpoint `/meta` riêng |
