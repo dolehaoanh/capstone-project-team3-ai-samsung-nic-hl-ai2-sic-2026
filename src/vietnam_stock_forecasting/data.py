@@ -203,6 +203,18 @@ def write_csv_snapshot(
     return output
 
 
+def is_snapshot_stale(snapshot: MarketSnapshot, max_age_days: int = 1) -> bool:
+    """Check if snapshot data is older than max_age_days compared to today."""
+    if not snapshot.end_date:
+        return True
+    try:
+        end_date = pd.to_datetime(snapshot.end_date).date()
+        today = pd.Timestamp.now(tz=None).date()
+        return (today - end_date).days >= max_age_days
+    except Exception:
+        return True
+
+
 def get_vn30_symbols(*, online: bool = False) -> list[str]:
     """Return VN30 stock symbols, optionally querying online provider if enabled."""
     if online:

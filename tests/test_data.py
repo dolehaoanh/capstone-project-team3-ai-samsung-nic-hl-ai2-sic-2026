@@ -11,6 +11,7 @@ from vietnam_stock_forecasting.data import (
     cli_main,
     fetch_vietnam_history,
     get_vn30_symbols,
+    is_snapshot_stale,
     load_csv_snapshot,
     validate_market_frame,
     write_csv_snapshot,
@@ -235,3 +236,40 @@ def test_cli_main_with_mock(tmp_path):
         assert code == 0
         assert out_csv.is_file()
         assert out_csv.with_suffix(".metadata.json").is_file()
+
+
+def test_is_snapshot_stale():
+    now = pd.Timestamp.now()
+    today = now.strftime("%Y-%m-%d")
+    old_date = (now - pd.Timedelta("5D")).strftime("%Y-%m-%d")
+
+    fresh_snapshot = MarketSnapshot(
+        frame=pd.DataFrame([_valid_row(date=today)]),
+        source="sample",
+        retrieved_at=now,
+        start_date=today,
+        end_date=today,
+        symbols=("AAA",),
+    )
+    assert not is_snapshot_stale(fresh_snapshot, max_age_days=1)
+
+    stale_snapshot = MarketSnapshot(
+        frame=pd.DataFrame([_valid_row(date=old_date)]),
+        source="sample",
+        retrieved_at=now,
+        start_date=old_date,
+        end_date=old_date,
+        symbols=("AAA",),
+    )
+    assert is_snapshot_stale(stale_snapshot, max_age_days=1)
+    assert not is_snapshot_stale(stale_snapshot, max_age_days=10)
+
+    empty_snapshot = MarketSnapshot(
+        frame=pd.DataFrame(columns=COLUMN_ORDER),
+        source="sample",
+        retrieved_at=now,
+        start_date=None,
+        end_date=None,
+        symbols=(),
+    )
+    assert is_snapshot_stale(empty_snapshot)
