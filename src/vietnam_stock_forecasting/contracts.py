@@ -33,6 +33,13 @@ class ForecastResponse(BaseModel):
     generated_at: datetime
     forecasts: list[Forecast]
     disclaimer: str
+    # Provenance of the snapshot behind `forecasts`; see docs/CONTRACTS_VI.md section 4.
+    # Optional so that consumers written against the earlier contract keep working.
+    source: str | None = None
+    data_start: date | None = None
+    data_end: date | None = None
+    snapshot_retrieved_at: datetime | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class RecommendationRequest(BaseModel):
