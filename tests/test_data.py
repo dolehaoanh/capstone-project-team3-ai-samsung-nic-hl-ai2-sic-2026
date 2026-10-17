@@ -162,6 +162,15 @@ def test_load_csv_snapshot_without_metadata(tmp_path):
     assert loaded.end_date == "2024-02-01"
 
 
+def test_invalid_metadata_is_rejected(tmp_path):
+    output_csv = tmp_path / "broken.csv"
+    pd.DataFrame([_valid_row()]).to_csv(output_csv, index=False)
+    output_csv.with_suffix(".metadata.json").write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="metadata is not valid JSON"):
+        load_csv_snapshot(output_csv)
+
+
 def test_get_vn30_symbols():
     symbols = get_vn30_symbols(online=False)
     assert len(symbols) == 30

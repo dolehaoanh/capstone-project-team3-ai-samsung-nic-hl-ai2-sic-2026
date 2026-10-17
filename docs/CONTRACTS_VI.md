@@ -293,12 +293,11 @@ Thông báo lỗi trả cho người dùng là **tiếng Việt** (giao diện t
 | Bình thường | `200` | — |
 | `mode=online` | `501` | `Chế độ làm mới trực tuyến chưa được bật trong MVP.` |
 | Snapshot không đủ lịch sử để tạo dự báo | `422` | `Snapshot không đủ lịch sử để tạo dự báo.` |
-| Snapshot thiếu, sai định dạng hoặc không hợp lệ | `503` | `Không đọc được snapshot dữ liệu. Kiểm tra đường dẫn snapshot và tài liệu chạy demo.` |
+| Snapshot thiếu, sai định dạng, metadata hỏng hoặc không hợp lệ | `503` | `Không đọc được snapshot dữ liệu. Kiểm tra đường dẫn snapshot và tài liệu chạy demo.` |
 
-`503` là mã bổ sung cho tình huống hiện chưa được xử lý: `load_csv_snapshot` raise
-`FileNotFoundError` (file thiếu) hoặc `ValueError` (CSV không hợp lệ) mà không ai bắt,
-nên API trả `500` kèm traceback. Đây là sửa lỗi, không phải lựa chọn thiết kế cần
-Owner quyết.
+`503` áp dụng cho file thiếu, CSV không hợp lệ hoặc sidecar metadata hỏng/không hợp lệ.
+API không được bỏ qua sidecar lỗi rồi phục vụ CSV như snapshot hợp lệ, vì như vậy
+provenance có thể bị mất hoặc trở thành success-shaped response không đáng tin cậy.
 
 Lưu ý khi làm UI: không phải mã lỗi nào cũng do code của ta sinh ra. Nếu client gửi
 `risk_profile` sai enum, FastAPI tự trả `422` với `detail` là **list** chứ không phải

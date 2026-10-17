@@ -155,27 +155,50 @@ def load_csv_snapshot(path: str | Path) -> MarketSnapshot:
         try:
             with meta_path.open("r", encoding="utf-8") as f:
                 meta = json.load(f)
-            source = str(meta.get("source", str(csv_path)))
-            retrieved_at_val = meta.get("retrieved_at")
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Snapshot metadata is not valid JSON: {meta_path}") from exc
+
+        if not isinstance(meta, dict):
+            raise ValueError(f"Snapshot metadata must be a JSON object: {meta_path}")
+
+        source = str(meta.get("source", str(csv_path)))
+        retrieved_at_val = meta.get("retrieved_at")
+        try:
             retrieved_at = pd.Timestamp(retrieved_at_val) if retrieved_at_val else pd.Timestamp.utcnow()
-            start_date = meta.get("start_date")
-            end_date = meta.get("end_date")
-            raw_symbols = meta.get("symbols")
-            symbols = tuple(raw_symbols) if raw_symbols is not None else None
-            frequency = str(meta.get("frequency", "1D"))
-            adjusted = bool(meta.get("adjusted", True))
-            return MarketSnapshot(
-                frame=frame,
-                source=source,
-                retrieved_at=retrieved_at,
-                start_date=start_date,
-                end_date=end_date,
-                symbols=symbols,
-                frequency=frequency,
-                adjusted=adjusted,
-            )
-        except Exception:
-            pass
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Snapshot metadata has an invalid retrieved_at: {meta_path}") from exc
+
+        start_date = meta.get("start_date")
+        end_date = meta.get("end_date")
+        for field_name, field_value in (("start_date", start_date), ("end_date", end_date)):
+            if field_value is not None:
+                try:
+                    pd.Timestamp(field_value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"Snapshot metadata has an invalid {field_name}: {meta_path}"
+                    ) from exc
+
+        raw_symbols = meta.get("symbols")
+        if raw_symbols is not None and (
+            not isinstance(raw_symbols, (list, tuple))
+            or any(not isinstance(symbol, str) for symbol in raw_symbols)
+        ):
+            raise ValueError(f"Snapshot metadata has invalid symbols: {meta_path}")
+
+        symbols = tuple(raw_symbols) if raw_symbols is not None else None
+        frequency = str(meta.get("frequency", "1D"))
+        adjusted = bool(meta.get("adjusted", True))
+        return MarketSnapshot(
+            frame=frame,
+            source=source,
+            retrieved_at=retrieved_at,
+            start_date=start_date,
+            end_date=end_date,
+            symbols=symbols,
+            frequency=frequency,
+            adjusted=adjusted,
+        )
 
     retrieved_at = pd.Timestamp.utcnow()
     return MarketSnapshot(frame=frame, source=str(csv_path), retrieved_at=retrieved_at)

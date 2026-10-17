@@ -144,6 +144,16 @@ def test_invalid_snapshot_returns_503(monkeypatch, tmp_path):
     assert response.status_code == 503
 
 
+def test_invalid_snapshot_metadata_returns_503(snapshot_env, tmp_path):
+    snapshot_env()
+    (tmp_path / "snapshot.metadata.json").write_text("{not-json", encoding="utf-8")
+
+    response = client.get("/forecasts")
+
+    assert response.status_code == 503
+    assert "snapshot" in response.json()["detail"].lower()
+
+
 def test_forecast_as_of_is_the_last_session_in_the_snapshot(snapshot_env):
     path = snapshot_env(periods=60)
     last_session = pd.read_csv(path, parse_dates=["date"])["date"].max().date().isoformat()
