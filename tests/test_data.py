@@ -11,6 +11,7 @@ from vietnam_stock_forecasting.data import (
     cli_main,
     fetch_vietnam_history,
     get_vn30_symbols,
+    is_snapshot_stale,
     load_csv_snapshot,
     validate_market_frame,
     write_csv_snapshot,
@@ -97,6 +98,13 @@ def test_duplicate_symbol_and_date_raises():
         validate_market_frame(data)
 
 
+def test_future_dates_rejected():
+    future_date = (pd.Timestamp.now() + pd.Timedelta(5, unit="D")).strftime("%Y-%m-%d")
+    data = pd.DataFrame([_valid_row(date=future_date)])
+    with pytest.raises(ValueError, match="future dates"):
+        validate_market_frame(data)
+
+
 def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     frame = pd.DataFrame(
         [
@@ -111,6 +119,8 @@ def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     assert snapshot.start_date == "2024-01-02"
     assert snapshot.end_date == "2024-01-03"
     assert snapshot.symbols == ("AAA", "BBB")
+    assert snapshot.frequency == "1D"
+    assert snapshot.adjusted is True
 
     output_csv = tmp_path / "nested" / "snapshot.csv"
     output = write_csv_snapshot(snapshot, output_csv)
@@ -126,6 +136,8 @@ def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     assert meta["end_date"] == "2024-01-03"
     assert meta["symbols"] == ["AAA", "BBB"]
     assert meta["row_count"] == 3
+    assert meta["frequency"] == "1D"
+    assert meta["adjusted"] is True
 
     # Load back using load_csv_snapshot
     loaded = load_csv_snapshot(output)
@@ -133,6 +145,8 @@ def test_snapshot_writer_creates_reproducible_csv_and_metadata(tmp_path):
     assert loaded.symbols == ("AAA", "BBB")
     assert loaded.start_date == "2024-01-02"
     assert loaded.end_date == "2024-01-03"
+    assert loaded.frequency == "1D"
+    assert loaded.adjusted is True
     assert len(loaded.frame) == 3
 
 
@@ -146,6 +160,15 @@ def test_load_csv_snapshot_without_metadata(tmp_path):
     assert loaded.symbols == ("XYZ",)
     assert loaded.start_date == "2024-02-01"
     assert loaded.end_date == "2024-02-01"
+
+
+def test_invalid_metadata_is_rejected(tmp_path):
+    output_csv = tmp_path / "broken.csv"
+    pd.DataFrame([_valid_row()]).to_csv(output_csv, index=False)
+    output_csv.with_suffix(".metadata.json").write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="metadata is not valid JSON"):
+        load_csv_snapshot(output_csv)
 
 
 def test_get_vn30_symbols():
@@ -222,3 +245,40 @@ def test_cli_main_with_mock(tmp_path):
         assert code == 0
         assert out_csv.is_file()
         assert out_csv.with_suffix(".metadata.json").is_file()
+
+
+def test_is_snapshot_stale():
+    now = pd.Timestamp.now()
+    today = now.strftime("%Y-%m-%d")
+    old_date = (now - pd.Timedelta("5D")).strftime("%Y-%m-%d")
+
+    fresh_snapshot = MarketSnapshot(
+        frame=pd.DataFrame([_valid_row(date=today)]),
+        source="sample",
+        retrieved_at=now,
+        start_date=today,
+        end_date=today,
+        symbols=("AAA",),
+    )
+    assert not is_snapshot_stale(fresh_snapshot, max_age_days=1)
+
+    stale_snapshot = MarketSnapshot(
+        frame=pd.DataFrame([_valid_row(date=old_date)]),
+        source="sample",
+        retrieved_at=now,
+        start_date=old_date,
+        end_date=old_date,
+        symbols=("AAA",),
+    )
+    assert is_snapshot_stale(stale_snapshot, max_age_days=1)
+    assert not is_snapshot_stale(stale_snapshot, max_age_days=10)
+
+    empty_snapshot = MarketSnapshot(
+        frame=pd.DataFrame(columns=COLUMN_ORDER),
+        source="sample",
+        retrieved_at=now,
+        start_date=None,
+        end_date=None,
+        symbols=(),
+    )
+    assert is_snapshot_stale(empty_snapshot)

@@ -6,5 +6,7 @@
   "symbols": [
     "AAA"
   ],
-  "row_count": 52
+  "row_count": 51,
+  "frequency": "1D",
+  "adjusted": true
 }

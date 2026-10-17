@@ -35,6 +35,7 @@ Hàm `validate_market_frame(frame)` kiểm soát chặt chẽ các lỗi:
 5. **Giá/Khối lượng âm:** Không cho phép giá hoặc khối lượng < 0.
 6. **Mâu thuẫn giá:** `high` không được nhỏ hơn `low`.
 7. **Trùng lặp:** Không cho phép trùng lặp cặp `(symbol, date)`.
+8. **Ngày tương lai:** Không chấp nhận dữ liệu có ngày vượt quá ngày hiện tại (`today`).
 
 ---
 
@@ -42,30 +43,54 @@ Hàm `validate_market_frame(frame)` kiểm soát chặt chẽ các lỗi:
 
 Khi lưu snapshot bằng `write_csv_snapshot(...)`, hệ thống tự động tạo file sidecar `<tên_file>.metadata.json`.
 
-Ví dụ nội dung file `vn30_snapshot.metadata.json`:
+Ví dụ nội dung file metadata:
 ```json
 {
   "source": "vnstock:VCI",
-  "retrieved_at": "2026-10-15T06:50:12.791246+00:00",
-  "start_date": "2024-01-02",
-  "end_date": "2024-06-28",
+  "retrieved_at": "2026-10-16T07:11:43.763456+00:00",
+  "start_date": "2025-10-16",
+  "end_date": "2026-10-16",
   "symbols": [
     "ACB",
+    "BCM",
     "BID",
+    "BVH",
     "CTG",
     "FPT",
+    "GAS",
+    "GVR",
+    "HDB",
     "HPG",
     "MBB",
     "MSN",
     "MWG",
+    "PLX",
+    "POW",
+    "SAB",
+    "SHB",
+    "SSB",
+    "SSI",
+    "STB",
     "TCB",
-    "VCB"
+    "TPB",
+    "VCB",
+    "VHM",
+    "VIB",
+    "VIC",
+    "VJC",
+    "VNM",
+    "VPB"
   ],
-  "row_count": 1200
+  "row_count": 7470,
+  "frequency": "1D",
+  "adjusted": true
 }
 ```
 
-Khi đọc snapshot bằng `load_csv_snapshot(...)`, thông tin metadata sẽ được tự động khôi phục vào đối tượng `MarketSnapshot`.
+Khi đọc snapshot bằng `load_csv_snapshot(...)`, thông tin metadata sẽ được tự động khôi phục
+vào đối tượng `MarketSnapshot`. Nếu sidecar JSON hỏng hoặc có `retrieved_at`, ngày hay
+`symbols` sai kiểu, loader báo `ValueError`; API chuyển lỗi này thành HTTP `503` thay vì
+phục vụ CSV như một snapshot hợp lệ nhưng mất provenance.
 
 ---
 
@@ -122,6 +147,29 @@ new_snapshot = fetch_vietnam_history(
 
 # 3. Lưu snapshot và metadata sidecar
 write_csv_snapshot(new_snapshot, "data/raw/my_snapshot.csv")
+```
+
+### 4.4. Mô hình Cache-First + Cập nhật ngầm 1 lần/ngày (Khuyến nghị cho Web App)
+
+Để tối ưu trải nghiệm người dùng không phải chờ đợi lâu và không bị nghẽn API rate limit (10 lượt/phút của vnstock v5):
+
+1. **Phục vụ ngay từ snapshot cục bộ:** App đọc file `data/sample/vn30_snapshot.csv` có sẵn (~0.05s).
+2. **Kiểm tra độ mới:** Dùng hàm `is_snapshot_stale(snapshot, max_age_days=1)`.
+3. **Cập nhật ngầm trong nền (Background Tasks):** Nếu dữ liệu đã cũ (hơn 1 ngày kể từ lần fetch trước), ứng dụng kích hoạt một tác vụ chạy ngầm (`FastAPI BackgroundTasks` hoặc worker) để kéo dữ liệu mới và cập nhật lại file snapshot, không làm block giao diện người dùng.
+
+```python
+from fastapi import BackgroundTasks, FastAPI
+from vietnam_stock_forecasting.data import is_snapshot_stale, load_csv_snapshot
+
+app = FastAPI()
+SNAPSHOT_PATH = "data/sample/vn30_snapshot.csv"
+
+@app.get("/market-data")
+async def get_market_data(background_tasks: BackgroundTasks):
+    snapshot = load_csv_snapshot(SNAPSHOT_PATH)
+    if is_snapshot_stale(snapshot, max_age_days=1):
+        background_tasks.add_task(refresh_market_data_background, SNAPSHOT_PATH)
+    return {"status": "ok", "retrieved_at": snapshot.retrieved_at, "data": snapshot.frame.to_dict(orient="records")}
 ```
 
 ---
