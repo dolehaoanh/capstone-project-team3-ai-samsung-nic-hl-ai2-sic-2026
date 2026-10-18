@@ -21,9 +21,17 @@ Kiểm tra trước khi demo:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Kết quả mong đợi: **92 passed** (71 test của lane App trong `tests/test_api.py` và
-`tests/test_refresh.py`, còn lại của các lane Data, Features, Modeling). Không test nào
-gọi mạng: hàm lấy dữ liệu được thay bằng bản giả trong mọi test cập nhật ngầm. Có một warning từ `starlette`
+Kết quả mong đợi: **114 passed** (93 test của lane App trong `tests/test_api.py`,
+`tests/test_refresh.py` và `tests/test_dashboard.py`, còn lại của các lane Data, Features,
+Modeling). Không test nào gọi mạng: hàm lấy dữ liệu được thay bằng bản giả trong mọi test
+cập nhật ngầm.
+
+`tests/test_dashboard.py` chạy đúng đoạn JavaScript của dashboard bằng **Node.js** (không
+cần `npm install`), trên DOM giả, với response thật của API: bảng xếp hạng, tuổi dữ liệu
+theo ngày Việt Nam, thông báo lỗi `501`/`422`/`503`, chống chèn HTML, và khóa nút danh
+sách nghiên cứu cho đến khi đã tải dự báo và đánh dấu xác nhận. Máy không có Node thì 20
+test này được **bỏ qua** (kết quả `94 passed, 20 skipped`); trên CI (`CI=true`) chúng
+**fail** thay vì bỏ qua. Có một warning từ `starlette`
 (`Using httpx with starlette.testclient is deprecated`) — đến từ thư viện, không phải
 code dự án, bỏ qua được.
 
