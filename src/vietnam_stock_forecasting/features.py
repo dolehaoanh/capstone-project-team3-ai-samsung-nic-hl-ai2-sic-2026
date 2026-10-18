@@ -25,7 +25,9 @@ def build_features(market: pd.DataFrame, horizon_days: int = 20) -> pd.DataFrame
     grouped = frame.groupby("symbol", group_keys=False)
     frame["return_5d"] = grouped["close"].pct_change(5)
     frame["return_20d"] = grouped["close"].pct_change(20)
-    frame["volatility_20d"] = grouped["close"].pct_change().rolling(20).std().reset_index(level=0, drop=True)
+    frame["volatility_20d"] = grouped["close"].transform(
+        lambda values: values.pct_change().rolling(20).std()
+    )
     frame["volume_ratio_20d"] = frame["volume"] / grouped["volume"].transform(
         lambda values: values.rolling(20).mean()
     )
@@ -34,5 +36,9 @@ def build_features(market: pd.DataFrame, horizon_days: int = 20) -> pd.DataFrame
 
     future_close = grouped["close"].shift(-horizon_days)
     frame["forward_return"] = future_close / frame["close"] - 1
-    frame["target_positive"] = (frame["forward_return"] > 0).astype("Int64")
+    frame["target_positive"] = (
+        (frame["forward_return"] > 0)
+        .where(frame["forward_return"].notna(), pd.NA)
+        .astype("Int64")
+    )
     return frame
