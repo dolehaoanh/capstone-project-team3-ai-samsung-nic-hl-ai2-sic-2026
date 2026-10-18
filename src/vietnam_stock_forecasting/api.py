@@ -21,6 +21,16 @@ from .contracts import (
 from .data import MarketSnapshot, load_csv_snapshot
 from .features import FEATURE_COLUMNS, build_features
 from .model import BaselineModel
+from .refresh import (
+    VN_TIMEZONE,
+    RefreshConfig,
+    RefreshState,
+    SnapshotRefresher,
+    last_session_is_intraday,
+    now_vn,
+    refresh_target,
+    to_vn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +43,16 @@ DISCLAIMER = (
 )
 HORIZON_DAYS = 20
 DEFAULT_SNAPSHOT_NAME = "vn30_snapshot.csv"
+DEFAULT_LIVE_SNAPSHOT_NAME = "vn30_live.csv"
 DEFAULT_STALE_AFTER_DAYS = 7
+# One year, matching the bundled snapshot (16/10/2025 -> 16/10/2026), so switching to
+# the live file does not silently change how much history the model trains on.
+DEFAULT_REFRESH_HISTORY_DAYS = 365
+DEFAULT_REFRESH_RETRY_MINUTES = 30
 MAX_LISTED_SYMBOLS = 10
-# Vietnam has observed UTC+7 with no daylight saving since 1975, so a fixed offset is
-# exact here and avoids depending on an IANA database being present on the host.
-VN_TIMEZONE = timezone(timedelta(hours=7))
+
+# One refresher per process; see refresh.py for the locking rules.
+REFRESHER = SnapshotRefresher()
 
 ONLINE_DISABLED_DETAIL = "Chế độ làm mới trực tuyến chưa được bật trong MVP."
 SNAPSHOT_UNAVAILABLE_DETAIL = (
@@ -87,22 +102,62 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _resolve(value: str) -> Path:
+    """Relative paths resolve against the repository root, not the current directory."""
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else _repo_root() / path
+
+
+def _data_dir() -> Path:
+    return _resolve(os.environ.get("DATA_DIR", "").strip() or "data")
+
+
 def _default_snapshot() -> Path:
     """Resolve the snapshot path from the environment, then fall back to the bundled sample.
 
     Priority: SNAPSHOT_PATH (full path) > DATA_DIR/sample/<default name> > repo data/sample.
-    Relative values are resolved against the repository root, not the current directory.
     """
     explicit = os.environ.get("SNAPSHOT_PATH", "").strip()
     if explicit:
-        path = Path(explicit).expanduser()
-        return path if path.is_absolute() else _repo_root() / path
+        return _resolve(explicit)
+    return _data_dir() / "sample" / DEFAULT_SNAPSHOT_NAME
 
-    data_dir = os.environ.get("DATA_DIR", "").strip()
-    base = Path(data_dir).expanduser() if data_dir else Path("data")
-    if not base.is_absolute():
-        base = _repo_root() / base
-    return base / "sample" / DEFAULT_SNAPSHOT_NAME
+
+def _live_snapshot() -> Path:
+    """Where the background refresh writes. Defaults under data/raw/, which git ignores,
+    so a running app never dirties the repository or the dataset submitted with it."""
+    explicit = os.environ.get("LIVE_SNAPSHOT_PATH", "").strip()
+    if explicit:
+        return _resolve(explicit)
+    return _data_dir() / "raw" / DEFAULT_LIVE_SNAPSHOT_NAME
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    raw = os.environ.get(name, "").strip()
+    try:
+        return max(minimum, int(raw)) if raw else default
+    except ValueError:
+        logger.warning("Invalid %s=%r, using %s", name, raw, default)
+        return default
+
+
+def _refresh_enabled() -> bool:
+    """Off unless asked for: tests, CI and a frozen demo must never reach the network."""
+    return _env_flag("ALLOW_ONLINE_REFRESH")
+
+
+def _refresh_config() -> RefreshConfig:
+    return RefreshConfig(
+        live_path=_live_snapshot(),
+        history_days=_env_int("REFRESH_HISTORY_DAYS", DEFAULT_REFRESH_HISTORY_DAYS, minimum=30),
+        retry_after=timedelta(
+            minutes=_env_int("REFRESH_RETRY_MINUTES", DEFAULT_REFRESH_RETRY_MINUTES, minimum=1)
+        ),
+    )
 
 
 def _load_snapshot(path: Path) -> MarketSnapshot:
@@ -127,12 +182,7 @@ def _build_feature_frame(snapshot: MarketSnapshot) -> pd.DataFrame:
 
 def _stale_after_days() -> int:
     """Staleness threshold in days; see docs/CONTRACTS_VI.md section 4.2 (Q2)."""
-    raw = os.environ.get("SNAPSHOT_STALE_DAYS", "").strip()
-    try:
-        return max(0, int(raw)) if raw else DEFAULT_STALE_AFTER_DAYS
-    except ValueError:
-        logger.warning("Invalid SNAPSHOT_STALE_DAYS=%r, using %s", raw, DEFAULT_STALE_AFTER_DAYS)
-        return DEFAULT_STALE_AFTER_DAYS
+    return _env_int("SNAPSHOT_STALE_DAYS", DEFAULT_STALE_AFTER_DAYS)
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -153,7 +203,7 @@ def _data_age_warning(data_end: date | None) -> str | None:
     # Age is measured against the Vietnamese trading day, not UTC: between 00:00 and
     # 07:00 Vietnam time the UTC date is still the previous day, which would understate
     # the age by one day for exactly the users this tool is built for.
-    age_days = (datetime.now(VN_TIMEZONE).date() - data_end).days
+    age_days = (now_vn().date() - data_end).days
     if age_days < 0:
         # A session that has not happened yet cannot have OHLCV data. validate_market_frame
         # already rejects future rows in the CSV, but `end_date` comes from the metadata
@@ -170,6 +220,41 @@ def _data_age_warning(data_end: date | None) -> str | None:
         f"Snapshot kết thúc ngày {data_end.strftime('%d/%m/%Y')}, cũ {age_days} ngày. "
         "Đây là dữ liệu nghiên cứu offline, không phải dữ liệu thời gian thực."
     )
+
+
+def _intraday_warning(snapshot: MarketSnapshot, data_end: date | None) -> str | None:
+    """Flag a last session captured before the market closed: its "close" is a mid-session
+    price, yet nothing else in the data distinguishes it from a real closing price."""
+    if not last_session_is_intraday(data_end, snapshot.retrieved_at):
+        return None
+    taken = to_vn(snapshot.retrieved_at)
+    return (
+        f"Phiên {data_end.strftime('%d/%m/%Y')} được lấy lúc {taken.strftime('%H:%M')} giờ "
+        "Việt Nam, trước giờ đóng cửa (15:00), nên giá của phiên này có thể là giá giữa "
+        "phiên, chưa phải giá chốt."
+    )
+
+
+def _refresh_notice(state: RefreshState, data_end: date | None, *, still_due: bool) -> str | None:
+    """Tell the user what the background refresh is doing to the numbers on screen.
+
+    A failure is reported only while the snapshot in use still needs that refresh: once a
+    newer snapshot arrives by another route, an old failure says nothing about the data.
+    """
+    shown = data_end.strftime("%d/%m/%Y") if data_end else "không rõ"
+    if state.running and state.started_at:
+        return (
+            "Đang cập nhật dữ liệu thị trường mới trong nền (bắt đầu lúc "
+            f"{state.started_at.strftime('%H:%M %d/%m')}). Bảng hiện vẫn dùng snapshot đến "
+            f"ngày {shown}; tải lại sau vài phút để xem dữ liệu mới."
+        )
+    if state.outcome == "error" and state.finished_at and still_due:
+        return (
+            "Lần cập nhật dữ liệu gần nhất (lúc "
+            f"{state.finished_at.strftime('%H:%M %d/%m')}) không thành công. Bảng hiện dùng "
+            f"snapshot đến ngày {shown}; hệ thống sẽ tự thử lại sau."
+        )
+    return None
 
 
 def _degenerate_model_warning(train_frame: pd.DataFrame) -> str | None:
@@ -212,8 +297,13 @@ def _evidence(row) -> list[str]:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "service": "vietnam-stock-forecasting"}
+def health() -> dict[str, object]:
+    # `snapshot_refresh` is additive: clients reading only `status` keep working.
+    return {
+        "status": "ok",
+        "service": "vietnam-stock-forecasting",
+        "snapshot_refresh": REFRESHER.status(enabled=_refresh_enabled(), config=_refresh_config()),
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -284,6 +374,14 @@ def home() -> str:
       const stamp = new Intl.DateTimeFormat("vi-VN",
         {dateStyle: "short", timeStyle: "short", timeZone: "Asia/Ho_Chi_Minh"});
       const day = new Intl.DateTimeFormat("vi-VN", {dateStyle: "short", timeZone: "Asia/Ho_Chi_Minh"});
+      // en-CA formats as YYYY-MM-DD, so both sides parse as UTC midnight and the
+      // difference is a whole number of Vietnamese calendar days.
+      const vnToday = () => new Intl.DateTimeFormat("en-CA", {timeZone: "Asia/Ho_Chi_Minh"}).format(new Date());
+      const ageText = iso => {
+        const days = Math.round((Date.parse(vnToday()) - Date.parse(iso)) / 86400000);
+        if (days < 0) return "ngày trong tương lai";
+        return days === 0 ? "dữ liệu hôm nay" : `dữ liệu cách đây ${days} ngày`;
+      };
       const box = (kind, text) => `<div class="${kind}">${esc(text)}</div>`;
       let loaded = [];
 
@@ -318,6 +416,7 @@ def home() -> str:
             `Nguồn: ${data.source || "không rõ"}`,
             `Dữ liệu: ${data.data_start ? day.format(new Date(data.data_start)) : "?"}`
               + ` → ${data.data_end ? day.format(new Date(data.data_end)) : "?"}`
+              + (data.data_end ? ` (${ageText(data.data_end)})` : "")
           ].join(" | ");
           messages.innerHTML = (data.warnings || []).map(text => box("warn", text)).join("");
           rows.innerHTML = data.forecasts.map(item => `<tr>
@@ -399,13 +498,13 @@ def home() -> str:
 
 @lru_cache(maxsize=4)
 def _cached_forecasts(
-    path_str: str, mtime_ns: int, size: int
+    path_str: str, mtime_ns: int, size: int, sidecar_mtime_ns: int
 ) -> tuple[MarketSnapshot, tuple[Forecast, ...], tuple[str, ...]]:
     """Load, featurise, train and predict — cached per snapshot file revision.
 
-    The cache key is the file identity (path, mtime, size), so replacing the snapshot on
-    disk invalidates it without restarting the app. `mtime_ns` and `size` are part of the
-    key only for that reason; the body does not read them.
+    The cache key is the identity of the CSV (path, mtime, size) plus the mtime of its
+    metadata sidecar, so replacing either on disk invalidates it without restarting the
+    app. Those values are part of the key only for that reason; the body does not read them.
 
     Nothing time-dependent may be computed here: warnings are derived per request in
     `_snapshot_forecasts` so that a long-running server does not freeze the data age.
@@ -460,22 +559,79 @@ def _cached_forecasts(
     return snapshot, tuple(items), data_warnings
 
 
+CachedForecasts = tuple[MarketSnapshot, tuple[Forecast, ...], tuple[str, ...]]
+
+
+def _forecasts_for(path: Path) -> CachedForecasts:
+    try:
+        stat = path.stat()
+    except OSError:
+        logger.warning("Snapshot not reachable: %s", path)
+        raise HTTPException(status_code=503, detail=SNAPSHOT_UNAVAILABLE_DETAIL) from None
+    # Same lookup order as load_csv_snapshot, so the key follows the sidecar it reads.
+    sidecar_mtime_ns = 0
+    for sidecar in (path.with_suffix(".metadata.json"), path.with_suffix(".json")):
+        try:
+            sidecar_mtime_ns = sidecar.stat().st_mtime_ns
+            break
+        except OSError:
+            continue
+    return _cached_forecasts(str(path), stat.st_mtime_ns, stat.st_size, sidecar_mtime_ns)
+
+
+def _freshness(result: CachedForecasts) -> tuple[date, datetime]:
+    snapshot = result[0]
+    return (_parse_iso_date(snapshot.end_date) or date.min, to_vn(snapshot.retrieved_at))
+
+
+def _active_forecasts() -> CachedForecasts:
+    """Pick the snapshot to answer from: the live file when refresh is on and it is valid
+    and fresher, otherwise the configured snapshot.
+
+    With refresh off the live file is ignored even if it exists, so turning the flag off
+    (for example on demo day) freezes the numbers on the configured snapshot.
+    """
+    base_path = _default_snapshot()
+    live_path = _live_snapshot()
+    if not _refresh_enabled() or live_path == base_path or not live_path.is_file():
+        return _forecasts_for(base_path)
+    try:
+        live = _forecasts_for(live_path)
+    except HTTPException:
+        logger.warning("Live snapshot unusable, falling back to %s", base_path)
+        return _forecasts_for(base_path)
+    try:
+        base = _forecasts_for(base_path)
+    except HTTPException:
+        return live
+    # The configured snapshot wins ties, and also wins outright when someone has
+    # committed a newer one than the last refresh produced.
+    return live if _freshness(live) > _freshness(base) else base
+
+
 def _snapshot_forecasts() -> tuple[MarketSnapshot, list[Forecast], list[str]]:
     """Return the ranked forecast list plus non-blocking warnings for the current snapshot.
 
     Shared by /forecasts and /recommendations so a shortlist can never be built from
     numbers that differ from the ones shown on the dashboard.
     """
-    path = _default_snapshot()
-    try:
-        stat = path.stat()
-    except OSError:
-        logger.warning("Snapshot not reachable: %s", path)
-        raise HTTPException(status_code=503, detail=SNAPSHOT_UNAVAILABLE_DETAIL) from None
+    snapshot, items, data_warnings = _active_forecasts()
+    if _refresh_enabled():
+        # Never waits on the network: the fetch runs in a background thread and the
+        # numbers below come from the snapshot already on disk.
+        REFRESHER.maybe_start(snapshot, _refresh_config())
 
-    snapshot, items, data_warnings = _cached_forecasts(str(path), stat.st_mtime_ns, stat.st_size)
-    age_warning = _data_age_warning(_parse_iso_date(snapshot.end_date))
-    warnings = ([age_warning] if age_warning else []) + list(data_warnings)
+    data_end = _parse_iso_date(snapshot.end_date)
+    notices = (
+        _data_age_warning(data_end),
+        _intraday_warning(snapshot, data_end),
+        _refresh_notice(
+            REFRESHER.state,
+            data_end,
+            still_due=refresh_target(snapshot.retrieved_at, now_vn()) is not None,
+        ),
+    )
+    warnings = [text for text in notices if text] + list(data_warnings)
     return snapshot, list(items), warnings
 
 
