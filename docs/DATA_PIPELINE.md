@@ -79,8 +79,7 @@ Ví dụ nội dung file metadata:
     "VIC",
     "VJC",
     "VNM",
-    "VPB",
-    "VRE"
+    "VPB"
   ],
   "row_count": 7470,
   "frequency": "1D",
@@ -88,7 +87,10 @@ Ví dụ nội dung file metadata:
 }
 ```
 
-Khi đọc snapshot bằng `load_csv_snapshot(...)`, thông tin metadata sẽ được tự động khôi phục vào đối tượng `MarketSnapshot`.
+Khi đọc snapshot bằng `load_csv_snapshot(...)`, thông tin metadata sẽ được tự động khôi phục
+vào đối tượng `MarketSnapshot`. Nếu sidecar JSON hỏng hoặc có `retrieved_at`, ngày hay
+`symbols` sai kiểu, loader báo `ValueError`; API chuyển lỗi này thành HTTP `503` thay vì
+phục vụ CSV như một snapshot hợp lệ nhưng mất provenance.
 
 ---
 

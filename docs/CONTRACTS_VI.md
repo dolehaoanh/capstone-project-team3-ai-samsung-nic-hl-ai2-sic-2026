@@ -235,14 +235,31 @@ Response `200`:
 ```json
 {
   "status": "ok",
-  "service": "vietnam-stock-forecasting"
+  "service": "vietnam-stock-forecasting",
+  "snapshot_refresh": {
+    "enabled": false,
+    "running": false,
+    "live_path": ".../data/raw/vn30_live.csv",
+    "target_session": null,
+    "last_started_at": null,
+    "last_finished_at": null,
+    "last_outcome": null,
+    "last_error": null,
+    "last_rows": null
+  }
 }
 ```
+
+`snapshot_refresh` là bổ sung của lane App cho cập nhật ngầm ([§4.5](#45-cập-nhật-dữ-liệu-ngầm)).
+Khóa này chỉ **thêm vào**, client chỉ đọc `status` vẫn chạy bình thường. `last_outcome`
+nhận `ok`, `error` hoặc `null` (chưa chạy lần nào). `last_error` là thông tin kỹ thuật
+cho người vận hành, không hiển thị cho người dùng.
 
 ### `GET /forecasts?mode=snapshot`
 
 `mode` nhận `snapshot` hoặc `online`. MVP bắt buộc hỗ trợ `snapshot`; `online` trả
-`501` vì online refresh không được bật trong MVP **[CHỜ CHỐT]**.
+`501` vì online refresh không được bật trong MVP **[CHỜ CHỐT]**. Dữ liệu mới từ sàn
+đi qua cập nhật ngầm ([§4.5](#45-cập-nhật-dữ-liệu-ngầm)), không qua `mode=online`.
 
 Response `200`:
 
@@ -293,12 +310,11 @@ Thông báo lỗi trả cho người dùng là **tiếng Việt** (giao diện t
 | Bình thường | `200` | — |
 | `mode=online` | `501` | `Chế độ làm mới trực tuyến chưa được bật trong MVP.` |
 | Snapshot không đủ lịch sử để tạo dự báo | `422` | `Snapshot không đủ lịch sử để tạo dự báo.` |
-| Snapshot thiếu, sai định dạng hoặc không hợp lệ | `503` | `Không đọc được snapshot dữ liệu. Kiểm tra đường dẫn snapshot và tài liệu chạy demo.` |
+| Snapshot thiếu, sai định dạng, metadata hỏng hoặc không hợp lệ | `503` | `Không đọc được snapshot dữ liệu. Kiểm tra đường dẫn snapshot và tài liệu chạy demo.` |
 
-`503` là mã bổ sung cho tình huống hiện chưa được xử lý: `load_csv_snapshot` raise
-`FileNotFoundError` (file thiếu) hoặc `ValueError` (CSV không hợp lệ) mà không ai bắt,
-nên API trả `500` kèm traceback. Đây là sửa lỗi, không phải lựa chọn thiết kế cần
-Owner quyết.
+`503` áp dụng cho file thiếu, CSV không hợp lệ hoặc sidecar metadata hỏng/không hợp lệ.
+API không được bỏ qua sidecar lỗi rồi phục vụ CSV như snapshot hợp lệ, vì như vậy
+provenance có thể bị mất hoặc trở thành success-shaped response không đáng tin cậy.
 
 Lưu ý khi làm UI: không phải mã lỗi nào cũng do code của ta sinh ra. Nếu client gửi
 `risk_profile` sai enum, FastAPI tự trả `422` với `detail` là **list** chứ không phải
@@ -330,6 +346,12 @@ Briefing §4 yêu cầu có trạng thái "snapshot cũ" nhưng chưa có địn
   dữ liệu, nên API trả `503`. Cảnh báo ở tầng App vẫn được giữ cho trường hợp CSV hợp
   lệ nhưng **sidecar** ghi `end_date` tương lai: `load_csv_snapshot` đọc `end_date` từ
   sidecar mà không đối chiếu với CSV.
+- Nếu snapshot được lấy **trước 15:00 giờ VN của chính phiên cuối** (`retrieved_at` <
+  15:00 ngày `data_end`), giá của phiên đó là giá giữa phiên chứ chưa phải giá đóng cửa
+  (ATC kết thúc 14:45). Thêm một chuỗi vào `warnings`, nêu ngày phiên và giờ lấy. Snapshot
+  `vn30_snapshot.csv` hiện tại rơi đúng vào trường hợp này (lấy lúc 14:02 ngày 16/10/2026).
+- Dashboard hiển thị tuổi dữ liệu thường trực ngay trong dòng trạng thái, ví dụ *"Dữ liệu:
+  16/10/25 → 16/10/26 (dữ liệu cách đây 1 ngày)"*, tính theo ngày Việt Nam.
 
 `warnings` còn chứa một cảnh báo thứ hai, độc lập với tuổi dữ liệu: khi tập huấn luyện
 chỉ có **một lớp kết quả**, `BaselineModel` rơi vào `DummyClassifier(strategy="prior")`
@@ -442,6 +464,36 @@ giao phần này cho lane nào; so sánh buy-and-hold hiện thuộc báo cáo c
 (Briefing §3). Nếu Owner muốn đưa lên dashboard thì cần chỉ định nguồn số lãi suất và
 lane chịu trách nhiệm.
 
+### 4.5. Cập nhật dữ liệu ngầm
+
+Triển khai hướng Owner chốt ngày 16/10 (Q3): app trả lời ngay từ snapshot có sẵn, việc
+kéo dữ liệu mới chạy ngầm trong nền. Lane App sở hữu phần điều phối
+(`src/vietnam_stock_forecasting/refresh.py`). Việc lấy và ghi dữ liệu dùng lại hàm của
+lane Data (`fetch_vietnam_history`, `write_csv_snapshot`, `load_csv_snapshot`), không
+viết lại.
+
+| Quy tắc | Giá trị | Lý do |
+|---|---|---|
+| Bật/tắt | `ALLOW_ONLINE_REFRESH=true`; **tắt mặc định** | Test, CI và buổi demo đã chốt số không được gọi mạng |
+| Khi nào cần cập nhật | `retrieved_at` của snapshot đang dùng có trước **15:00 giờ VN** của phiên đã đóng cửa gần nhất (ngày thường; 15:00 chừa biên sau ATC 14:45) | So `end_date` với lịch thì T7, CN, ngày lễ luôn "cũ" và mỗi request đều gọi sàn |
+| File đích | `LIVE_SNAPSHOT_PATH`, mặc định `<DATA_DIR>/raw/vn30_live.csv` **[CHỜ CHỐT]** | `data/raw/` bị git bỏ qua; `data/sample/vn30_snapshot.csv` giữ cố định làm dataset nộp bài |
+| Ghi file | Ghi ra thư mục tạm cạnh file đích, đọc kiểm lại bằng `load_csv_snapshot`, rồi `os.replace` metadata trước, CSV sau | Người đọc không bao giờ thấy file ghi dở; cache khóa theo CSV nên cặp lệch tạm thời không bị giữ lại |
+| Chỉ phiên đã đóng | Bỏ mọi dòng sau phiên đích trước khi ghi | Không để giá giữa phiên lọt vào như giá đóng cửa |
+| Mã và nguồn | Đúng các mã trong `symbols` của snapshot đang dùng; nguồn lấy từ `source` (`vnstock:VCI` → `VCI`) | Không gọi thêm API danh sách VN30 |
+| Độ dài lịch sử | `REFRESH_HISTORY_DAYS`, mặc định `365` | Bằng snapshot gốc, để mô hình không âm thầm đổi lượng dữ liệu huấn luyện |
+| Đồng thời | Tối đa **một** lần cập nhật: khóa trong tiến trình + file khóa `vn30_live.lock` giữa các worker; file khóa cũ hơn 1 giờ coi như sót lại và bị dọn | Nhiều người vào cùng lúc không thành nhiều lần gọi sàn |
+| Sau khi lỗi | Chờ `REFRESH_RETRY_MINUTES` (mặc định `30`) mới thử lại; dashboard báo lỗi, vẫn trả `200` từ snapshot cũ | Không dội request vào sàn đang rate-limit |
+| Sau khi thành công | Không lấy lại cùng một phiên, kể cả khi file live không được chọn | Tránh vòng lặp khi nguồn chậm hơn snapshot đã commit |
+| Chọn file để đọc | Khi bật: đọc file live nếu hợp lệ và **mới hơn** (`end_date`, rồi `retrieved_at`); bằng nhau thì giữ snapshot gốc; file live hỏng thì quay về snapshot gốc. Khi tắt: **bỏ qua** file live | Tắt cờ hôm demo là số liệu đứng yên |
+
+Response không đổi schema. `mode` vẫn là `snapshot`, vì số liệu luôn đến từ một file đã
+ghi xong. Trạng thái cập nhật đi qua `warnings` (đang chạy / lần gần nhất lỗi) và qua
+`snapshot_refresh` của `/health`.
+
+Còn phụ thuộc lane Data (Issue #4): `fetch_vietnam_history` raise ngay khi **một** mã trả
+về rỗng, nên một mã lỗi làm hỏng cả lần cập nhật 30 mã. App ghi nhận lỗi và thử lại theo
+chu kỳ, nhưng không tự bỏ qua mã lỗi được nếu không sửa file của lane Data.
+
 ## 5. Quy tắc tích hợp
 
 1. Data lane có thể dùng fixture CSV; không cần chờ API online.
@@ -457,12 +509,15 @@ lane chịu trách nhiệm.
    tương đối nên test chỉ pass khi `pytest` chạy từ gốc repo), và phải override được qua
    biến môi trường.
 9. Snapshot được cache trong tiến trình theo **(đường dẫn, `mtime`, kích thước)** của
-   file. Hệ quả vận hành: sau khi lane Data ghi snapshot mới vào đúng đường dẫn đang
-   dùng, **không cần restart app** — request kế tiếp tự nạp lại. Mọi giá trị phụ thuộc
+   file CSV, cộng `mtime` của sidecar metadata. Hệ quả vận hành: sau khi lane Data ghi
+   snapshot mới (hoặc chỉ sửa metadata) vào đúng đường dẫn đang dùng, **không cần
+   restart app** — request kế tiếp tự nạp lại. Mọi giá trị phụ thuộc
    thời gian (tuổi dữ liệu) phải được tính ngoài cache, nếu không app chạy dài ngày sẽ
    báo tuổi dữ liệu đóng băng.
-10. `.env.example` hiện chưa được code nào đọc (`DATA_DIR`, `MODEL_PATH`,
-   `ALLOW_ONLINE_REFRESH` đều không có loader và repo không có `python-dotenv`). Lane
+10. Repo không có bộ nạp `.env` (không có `python-dotenv`), nên `.env.example` chỉ là
+   danh sách biến cần export. `api.py` đọc trực tiếp `DATA_DIR`, `SNAPSHOT_PATH`,
+   `SNAPSHOT_STALE_DAYS`, `ALLOW_ONLINE_REFRESH`, `LIVE_SNAPSHOT_PATH`,
+   `REFRESH_HISTORY_DAYS`, `REFRESH_RETRY_MINUTES`; `MODEL_PATH` chưa ai đọc. Lane
    nào dùng biến môi trường thì đọc `os.environ` trực tiếp kèm default an toàn, và ghi
    rõ trong tài liệu chạy demo; không thêm dependency vào `pyproject.toml` nếu không
    thật cần, vì đó là file dùng chung.
@@ -475,7 +530,7 @@ Tổng hợp các mục **[CHỜ CHỐT]**.
 |---|---|---|---|
 | Q1 | Snapshot of record cho demo là file nào? ([§1.2](#12-snapshot-of-record-cho-demo)) | **Đã chốt (PR #10):** `data/sample/vn30_snapshot.csv`, 30 mã, giữ nguyên `.gitignore`. Còn mở: độ dài lịch sử (hiện 1 năm, đề xuất ≥3 năm) | — |
 | Q2 | Ngưỡng và cách đo tuổi dữ liệu ([§4.2](#42-quy-tắc-tuổi-dữ-liệu)) | Theo `data_end`, ngưỡng 7 ngày, luôn hiển thị tuổi, thông báo giải thích thay vì báo động | Không có trạng thái này, hoặc dải cảnh báo đọc như sự cố giữa buổi demo |
-| Q3 | `mode=online` giữ `501` hay bật thật, và ai nối? | **Hướng đã chốt (16/10):** dùng dữ liệu mới nhất từ sàn — app đọc snapshot ngay, cập nhật ngầm trong nền khi sang ngày mới. Còn mở: file đích của lần cập nhật ngầm, và `mode=online` giữ `501` hay bỏ | Lane App và lane Data chờ nhau |
+| Q3 | `mode=online` giữ `501` hay bật thật, và ai nối? | **Hướng đã chốt (16/10):** dùng dữ liệu mới nhất từ sàn — app đọc snapshot ngay, cập nhật ngầm trong nền khi sang ngày mới. **Đã triển khai ở lane App** ([§4.5](#45-cập-nhật-dữ-liệu-ngầm)), tắt mặc định. Còn mở: (a) file đích — đề xuất `data/raw/vn30_live.csv`, cấu hình được; (b) `mode=online` — đề xuất giữ `501`; (c) hôm demo bật hay tắt — đề xuất tắt | Lane App và lane Data chờ nhau |
 | Q4 | Ai định nghĩa tiêu chí risk profile ([§4.3](#43-ngữ-nghĩa-shortlist))? | Lane Modeling đưa ngưỡng, lane App render | Hai lane đưa ra hai định nghĩa khác nhau |
 | Q5 | Có đổi contract `/recommendations` để trả điểm/lý do từng mã? | Không đổi trong MVP | Lane App làm xong rồi phải sửa lại |
 | Q6 | So sánh benchmark và lãi suất tiết kiệm có trong MVP? README hứa, Briefing không giao lane nào | Không làm trong MVP; buy-and-hold để lane Modeling báo cáo | Rơi mặc định vào lane App ở phút cuối |

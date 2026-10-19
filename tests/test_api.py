@@ -14,6 +14,14 @@ from vietnam_stock_forecasting.contracts import Forecast, RiskProfile
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _no_background_refresh(monkeypatch, tmp_path):
+    # A developer shell may export ALLOW_ONLINE_REFRESH; these tests must stay offline
+    # and must never write the live snapshot inside the repository.
+    monkeypatch.delenv("ALLOW_ONLINE_REFRESH", raising=False)
+    monkeypatch.setenv("LIVE_SNAPSHOT_PATH", str(tmp_path / "raw" / "vn30_live.csv"))
+
+
 def _closes(pattern: str, periods: int, offset: int) -> list[float]:
     """Price paths chosen for what they do to `target_positive`.
 
@@ -142,6 +150,16 @@ def test_invalid_snapshot_returns_503(monkeypatch, tmp_path):
     response = client.get("/forecasts")
 
     assert response.status_code == 503
+
+
+def test_invalid_snapshot_metadata_returns_503(snapshot_env, tmp_path):
+    snapshot_env()
+    (tmp_path / "snapshot.metadata.json").write_text("{not-json", encoding="utf-8")
+
+    response = client.get("/forecasts")
+
+    assert response.status_code == 503
+    assert "snapshot" in response.json()["detail"].lower()
 
 
 def test_forecast_as_of_is_the_last_session_in_the_snapshot(snapshot_env):

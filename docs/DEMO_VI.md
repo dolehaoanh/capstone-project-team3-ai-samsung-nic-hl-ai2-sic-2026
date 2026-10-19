@@ -3,8 +3,9 @@
 Tài liệu vận hành cho ứng dụng web (`vietnam_stock_forecasting.api`), lane App
 (Issue #1). Mọi lệnh dưới đây đã được chạy thực tế trên Windows + Python 3.11.
 
-Ứng dụng chạy **hoàn toàn offline**: không cần internet, không cần API key. Dữ liệu
-đến từ snapshot CSV đã commit trong repo.
+Mặc định ứng dụng chạy **hoàn toàn offline**: không cần internet, không cần API key.
+Dữ liệu đến từ snapshot CSV đã commit trong repo. Cập nhật dữ liệu ngầm từ sàn là tính
+năng **tuỳ chọn, tắt mặc định** — xem [§3.1](#31-cập-nhật-dữ-liệu-ngầm-tuỳ-chọn).
 
 ## 1. Lập môi trường (một lần)
 
@@ -20,8 +21,17 @@ Kiểm tra trước khi demo:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Kết quả mong đợi: **60 passed** (40 test của lane App trong `tests/test_api.py`, còn
-lại của các lane Data, Features, Modeling). Có một warning từ `starlette`
+Kết quả mong đợi: **114 passed** (93 test của lane App trong `tests/test_api.py`,
+`tests/test_refresh.py` và `tests/test_dashboard.py`, còn lại của các lane Data, Features,
+Modeling). Không test nào gọi mạng: hàm lấy dữ liệu được thay bằng bản giả trong mọi test
+cập nhật ngầm.
+
+`tests/test_dashboard.py` chạy đúng đoạn JavaScript của dashboard bằng **Node.js** (không
+cần `npm install`), trên DOM giả, với response thật của API: bảng xếp hạng, tuổi dữ liệu
+theo ngày Việt Nam, thông báo lỗi `501`/`422`/`503`, chống chèn HTML, và khóa nút danh
+sách nghiên cứu cho đến khi đã tải dự báo và đánh dấu xác nhận. Máy không có Node thì 20
+test này được **bỏ qua** (kết quả `94 passed, 20 skipped`); trên CI (`CI=true`) chúng
+**fail** thay vì bỏ qua. Có một warning từ `starlette`
 (`Using httpx with starlette.testclient is deprecated`) — đến từ thư viện, không phải
 code dự án, bỏ qua được.
 
@@ -50,6 +60,10 @@ Dự án **không có bộ nạp `.env`** (không có `python-dotenv`), nên `.e
 | `SNAPSHOT_PATH` | — | Đường dẫn snapshot CSV; ưu tiên cao nhất |
 | `DATA_DIR` | `data` | Dùng khi không có `SNAPSHOT_PATH`; đọc `<DATA_DIR>/sample/vn30_snapshot.csv` |
 | `SNAPSHOT_STALE_DAYS` | `7` | Dữ liệu cũ hơn ngưỡng này sẽ sinh thông báo trong `warnings` |
+| `ALLOW_ONLINE_REFRESH` | tắt | `true` để bật cập nhật dữ liệu ngầm (§3.1) |
+| `LIVE_SNAPSHOT_PATH` | `<DATA_DIR>/raw/vn30_live.csv` | File mà lần cập nhật ngầm ghi ra (git bỏ qua thư mục này) |
+| `REFRESH_HISTORY_DAYS` | `365` | Số ngày lịch sử mỗi lần cập nhật kéo về, bằng độ dài snapshot gốc |
+| `REFRESH_RETRY_MINUTES` | `30` | Thời gian chờ trước khi thử lại sau một lần cập nhật lỗi |
 
 Đường dẫn tương đối được giải theo **gốc repo**, không theo thư mục đang đứng.
 
@@ -66,8 +80,53 @@ export SNAPSHOT_STALE_DAYS=7
 ```
 
 **Đổi snapshot không cần restart app.** Cache được khóa theo đường dẫn + `mtime` +
-kích thước file, nên sau khi lane Data ghi file mới vào cùng đường dẫn, request kế
-tiếp tự nạp lại. Chỉ cần restart khi đổi *biến môi trường*.
+kích thước file CSV, cộng `mtime` của file metadata đi kèm, nên sau khi lane Data ghi
+file mới vào cùng đường dẫn (kể cả khi chỉ sửa metadata), request kế tiếp tự nạp lại.
+Chỉ cần restart khi đổi *biến môi trường*.
+
+### 3.1. Cập nhật dữ liệu ngầm (tuỳ chọn)
+
+Hướng Owner chốt ngày 16/10: app trả lời ngay từ snapshot có sẵn, còn việc kéo dữ liệu
+mới chạy ngầm, không bắt người dùng chờ. Bật bằng:
+
+```powershell
+$env:ALLOW_ONLINE_REFRESH = "true"
+.venv/Scripts/python.exe -m pip install --extra-index-url https://vnstocks.com/api/packages vnstock
+.venv/Scripts/python.exe -m uvicorn vietnam_stock_forecasting.api:app
+```
+
+Cách hoạt động:
+
+1. Mỗi request `/forecasts` hoặc `/recommendations` trả lời **ngay** từ file trên đĩa.
+2. App kiểm tra snapshot đang dùng đã có phiên đóng cửa gần nhất chưa. Phiên được coi là
+   đóng sau **15:00 giờ VN** của ngày thường (ATC kết thúc 14:45). Điều kiện xét là
+   `retrieved_at` có trước 15:00 của phiên đó hay không, **không** so `end_date` với
+   lịch: so với lịch thì thứ 7, CN và ngày lễ lúc nào cũng "cũ", và mỗi request sẽ kích
+   hoạt một lần gọi sàn.
+3. Nếu thiếu, một luồng nền gọi `fetch_vietnam_history` của lane Data cho đúng các mã
+   trong snapshot, lấy 365 ngày đến phiên đó, bỏ mọi dòng sau phiên đó (giá giữa phiên).
+   Với 30 mã, mỗi lần mất khoảng 3–4 phút vì lane Data giãn cách 6,5 giây giữa các mã.
+4. Kết quả được ghi **nguyên khối** ra `data/raw/vn30_live.csv` + metadata: ghi ra thư mục
+   tạm cạnh file đích, đọc kiểm lại, rồi mới thay. Người đang xem không bao giờ đọc phải
+   file ghi dở. File `data/sample/vn30_snapshot.csv` mà git theo dõi **không bao giờ bị ghi
+   đè**, nên repo không bị bẩn và dataset nộp bài không đổi.
+5. Request sau tự dùng file live nếu nó hợp lệ và mới hơn snapshot gốc. File live hỏng
+   thì quay về snapshot gốc.
+
+Trong lúc chạy và khi lỗi, dashboard hiện thông báo trong dải cảnh báo, ví dụ *"Đang cập
+nhật dữ liệu thị trường mới trong nền… tải lại sau vài phút"*. Chỉ **một** lần cập nhật
+chạy tại một thời điểm, kể cả khi chạy nhiều worker (có file khóa `vn30_live.lock`). Lỗi
+thì chờ `REFRESH_RETRY_MINUTES` mới thử lại. Một phiên đã lấy thành công thì không lấy
+lại.
+
+Trạng thái chi tiết (bật/tắt, đang chạy, lần cuối, lỗi kỹ thuật) xem ở
+<http://127.0.0.1:8000/health>, trong khóa `snapshot_refresh`.
+
+**Hôm demo nên tắt** (`ALLOW_ONLINE_REFRESH` không đặt): khi tắt, app **bỏ qua** file
+live kể cả khi nó tồn tại, nên số liệu đứng yên trên snapshot đã chốt suốt buổi thuyết
+trình (đề xuất B2, chờ Owner chốt). Muốn demo bằng dữ liệu mới nhất thì bật cờ một lần
+trước buổi demo, chờ `/health` báo `last_outcome: ok`, rồi chép file live sang một đường
+dẫn cố định và trỏ `SNAPSHOT_PATH` vào đó.
 
 ## 4. Kịch bản demo (khoảng 5 phút)
 
@@ -100,8 +159,20 @@ Một công cụ trả về "95% chắc chắn tăng" cho mọi cổ phiếu m�
 Dòng trạng thái ngay dưới nút hiển thị:
 
 ```
-Tạo lúc: … | Chế độ: snapshot | Nguồn: vnstock:VCI | Dữ liệu: 16/10/25 → 16/10/26
+Tạo lúc: … | Chế độ: snapshot | Nguồn: vnstock:VCI | Dữ liệu: 16/10/25 → 16/10/26 (dữ liệu cách đây N ngày)
 ```
+
+Tuổi dữ liệu **luôn** hiện trong dòng này, tính theo ngày giờ Việt Nam, kể cả khi chưa
+vượt ngưỡng cảnh báo.
+
+Với snapshot hiện tại, ngay dưới dòng trạng thái có một dải thông báo:
+
+> Phiên 16/10/2026 được lấy lúc 14:02 giờ Việt Nam, trước giờ đóng cửa (15:00), nên giá
+> của phiên này có thể là giá giữa phiên, chưa phải giá chốt.
+
+Đây là giới hạn 4 ở §6, giờ app tự phát hiện từ `retrieved_at` thay vì để người trình
+bày phải nhớ. Dải này biến mất khi lane Data lấy lại file sau giờ đóng cửa, hoặc khi
+cập nhật ngầm (§3.1) đã ghi file live.
 
 Snapshot còn mới (trong ngưỡng `SNAPSHOT_STALE_DAYS`, mặc định 7 ngày) nên **không**
 có dải cảnh báo tuổi dữ liệu. Nếu demo diễn ra hơn 7 ngày sau ngày dữ liệu cuối mà
@@ -220,10 +291,15 @@ Trỏ về snapshot mẫu một mã rồi restart:
 $env:SNAPSHOT_PATH = "data/sample/vn30_sample.csv"
 ```
 
-Ứng dụng vẫn trả `200` nhưng hiện **hai** thông báo:
+Ứng dụng vẫn trả `200` nhưng hiện **ba** thông báo:
 
 > Snapshot kết thúc ngày 20/02/2024, cũ N ngày. Đây là dữ liệu nghiên cứu offline,
 > không phải dữ liệu thời gian thực.
+
+> Phiên 20/02/2024 được lấy lúc 07:00 giờ Việt Nam, trước giờ đóng cửa (15:00), …
+
+(metadata của file mẫu ghi `retrieved_at` là 00:00 UTC ngày dữ liệu cuối, nên app đọc
+đúng những gì metadata khai báo)
 
 > Dữ liệu huấn luyện chỉ có một lớp kết quả: mọi phiên đều tăng sau 20 phiên. Mô hình
 > không học được gì từ đó và chỉ trả về tỷ lệ nền, nên các con số dưới đây không mang
@@ -247,6 +323,9 @@ Nhớ đặt lại `SNAPSHOT_PATH` về snapshot chính sau khi demo.
 | Bảng hiện 1 dòng, mọi tỷ lệ bằng nhau | Đang dùng `vn30_sample.csv` (1 mã, dữ liệu tổng hợp) | Bỏ `SNAPSHOT_PATH` hoặc trỏ về `data/sample/vn30_snapshot.csv` |
 | Đổi snapshot mà số không đổi | Cache theo `mtime` + kích thước | File mới phải thực sự khác; nếu vẫn vậy thì restart app |
 | Cổng 8000 đã bị dùng | Tiến trình `uvicorn` cũ còn sống | Thêm `--port 8001` |
+| Dải "Lần cập nhật dữ liệu gần nhất … không thành công" | Chưa cài `vnstock`, mất mạng, hoặc sàn chặn rate-limit | Xem `last_error` ở `/health`; app vẫn chạy bằng snapshot cũ và tự thử lại sau `REFRESH_RETRY_MINUTES` phút |
+| Bật cập nhật ngầm mà không thấy chạy | Snapshot đã lấy sau 15:00 của phiên gần nhất, hoặc đang chờ thử lại sau lỗi | Xem `target_session`, `last_outcome` ở `/health`; đây là hành vi đúng |
+| Cập nhật ngầm không bao giờ chạy lại sau khi server bị tắt đột ngột | File khóa `vn30_live.lock` còn sót | App tự bỏ file khóa cũ hơn 1 giờ; muốn ngay thì xóa tay |
 
 ## 6. Giới hạn cần nói trước khi bị hỏi
 
@@ -263,7 +342,8 @@ Nói ra chủ động thì là sự trung thực khoa học; để giám khảo 
 4. **Phiên cuối của snapshot có thể chưa đóng cửa.** Snapshot hiện tại được lấy lúc
    14:02 giờ VN ngày 16/10/2026 (`retrieved_at` 07:02 UTC), trước giờ HOSE đóng cửa
    (ATC kết thúc 14:45). Dòng ngày 16/10 của cả 30 mã vì vậy là giá giữa phiên, không
-   phải giá đóng cửa. Thuộc lane Data (Issue #4).
+   phải giá đóng cửa. File thuộc lane Data (Issue #4); app hiện tự cảnh báo điều này
+   trên dashboard (Bước 2), và cập nhật ngầm chỉ ghi các phiên đã đóng cửa.
 5. **Mô hình gần như không có khả năng dự báo ngoài mẫu trên snapshot hiện tại.** Chạy
    `walk_forward_evaluate` trên 30 mã: tham số mặc định cho **AUC 0,534, accuracy
    50,9%**; với `min_train_rows=1000, test_window=300` thì AUC 0,484, accuracy 47,8%.
@@ -286,9 +366,12 @@ Nói ra chủ động thì là sự trung thực khoa học; để giám khảo 
    viên*, kể cả khi phần lớn tập đó có xác suất tăng dưới 50% (hiện 10/30 mã). Khi danh
    sách chứa mã dưới 50%, ứng dụng tự nêu trong phần thông báo — hãy đọc to câu đó khi
    demo. Việc có nên đặt sàn hay không thuộc Q4.
-10. **Chế độ `online` vẫn trả `501`.** Owner đã chốt dùng dữ liệu mới nhất từ sàn, theo
-   hướng đọc snapshot trước và cập nhật ngầm trong nền; phần cập nhật ngầm đang được
-   triển khai, chưa có trong bản này — Q3.
+10. **Chế độ `online` vẫn trả `501`.** Dữ liệu mới nhất từ sàn đi qua cập nhật ngầm
+   (§3.1), không qua `mode=online`: response vẫn là `mode: snapshot` vì số liệu luôn đến
+   từ một file đã ghi xong, không bao giờ từ một lần gọi sàn đang chạy. Cập nhật ngầm
+   **tắt mặc định**, và nếu một mã trả về rỗng thì cả lần cập nhật 30 mã thất bại (lỗi
+   bên `fetch_vietnam_history`, Issue #4) — app báo lỗi rồi thử lại sau. Việc giữ
+   `501` chờ Owner chốt — Q3.
 
 ## 7. Những câu không được nói
 
