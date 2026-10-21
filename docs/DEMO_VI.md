@@ -3,9 +3,10 @@
 Tài liệu vận hành cho ứng dụng web (`vietnam_stock_forecasting.api`), lane App
 (Issue #1). Mọi lệnh dưới đây đã được chạy thực tế trên Windows + Python 3.11.
 
-Mặc định ứng dụng chạy **hoàn toàn offline**: không cần internet, không cần API key.
-Dữ liệu đến từ snapshot CSV đã commit trong repo. Cập nhật dữ liệu ngầm từ sàn là tính
-năng **tuỳ chọn, tắt mặc định** — xem [§3.1](#31-cập-nhật-dữ-liệu-ngầm-tuỳ-chọn).
+Mặc định ứng dụng **ưu tiên lấy dữ liệu trực tuyến**. Ứng dụng vẫn trả lời ngay bằng
+snapshot hợp lệ mới nhất trên đĩa trong lúc cập nhật chạy nền; nếu mất mạng hoặc provider
+thất bại, snapshot local đó tiếp tục được dùng. Có thể ép chạy offline bằng cách đặt
+`ALLOW_ONLINE_REFRESH=false` — xem [§3.1](#31-cập-nhật-dữ-liệu-ngầm).
 
 ## 1. Lập môi trường (một lần)
 
@@ -28,7 +29,7 @@ cập nhật ngầm.
 
 `tests/test_dashboard.py` chạy đúng đoạn JavaScript của dashboard bằng **Node.js** (không
 cần `npm install`), trên DOM giả, với response thật của API: bảng xếp hạng, tuổi dữ liệu
-theo ngày Việt Nam, thông báo lỗi `501`/`422`/`503`, chống chèn HTML, và khóa nút danh
+theo ngày Việt Nam, thông báo lỗi `422`/`503`, chống chèn HTML, và khóa nút danh
 sách nghiên cứu cho đến khi đã tải dự báo và đánh dấu xác nhận. Máy không có Node thì 20
 test này được **bỏ qua** (kết quả `94 passed, 20 skipped`); trên CI (`CI=true`) chúng
 **fail** thay vì bỏ qua. Có một warning từ `starlette`
@@ -60,7 +61,7 @@ Dự án **không có bộ nạp `.env`** (không có `python-dotenv`), nên `.e
 | `SNAPSHOT_PATH` | — | Đường dẫn snapshot CSV; ưu tiên cao nhất |
 | `DATA_DIR` | `data` | Dùng khi không có `SNAPSHOT_PATH`; đọc `<DATA_DIR>/sample/vn30_snapshot.csv` |
 | `SNAPSHOT_STALE_DAYS` | `7` | Dữ liệu cũ hơn ngưỡng này sẽ sinh thông báo trong `warnings` |
-| `ALLOW_ONLINE_REFRESH` | tắt | `true` để bật cập nhật dữ liệu ngầm (§3.1) |
+| `ALLOW_ONLINE_REFRESH` | bật | `false` để tắt cập nhật trực tuyến và chạy offline (§3.1) |
 | `LIVE_SNAPSHOT_PATH` | `<DATA_DIR>/raw/vn30_live.csv` | File mà lần cập nhật ngầm ghi ra (git bỏ qua thư mục này) |
 | `REFRESH_HISTORY_DAYS` | `365` | Số ngày lịch sử mỗi lần cập nhật kéo về, bằng độ dài snapshot gốc |
 | `REFRESH_RETRY_MINUTES` | `30` | Thời gian chờ trước khi thử lại sau một lần cập nhật lỗi |
@@ -84,15 +85,21 @@ kích thước file CSV, cộng `mtime` của file metadata đi kèm, nên sau k
 file mới vào cùng đường dẫn (kể cả khi chỉ sửa metadata), request kế tiếp tự nạp lại.
 Chỉ cần restart khi đổi *biến môi trường*.
 
-### 3.1. Cập nhật dữ liệu ngầm (tuỳ chọn)
+### 3.1. Cập nhật dữ liệu ngầm (mặc định)
 
-Hướng Owner chốt ngày 16/10: app trả lời ngay từ snapshot có sẵn, còn việc kéo dữ liệu
-mới chạy ngầm, không bắt người dùng chờ. Bật bằng:
+App trả lời ngay từ snapshot có sẵn, còn việc kéo dữ liệu mới chạy ngầm, không bắt người
+dùng chờ. Đây là mặc định. Không cần đặt biến môi trường nếu máy có mạng và đã cài
+`vnstock`. Để ép offline:
 
 ```powershell
-$env:ALLOW_ONLINE_REFRESH = "true"
-.venv/Scripts/python.exe -m pip install --extra-index-url https://vnstocks.com/api/packages vnstock
-.venv/Scripts/python.exe -m uvicorn vietnam_stock_forecasting.api:app
+$env:ALLOW_ONLINE_REFRESH = "false"
+.venv\Scripts\python.exe -m uvicorn vietnam_stock_forecasting.api:app
+```
+
+Để cài provider khi cần:
+
+```powershell
+.venv\Scripts\python.exe -m pip install --extra-index-url https://vnstocks.com/api/packages vnstock
 ```
 
 Cách hoạt động:
@@ -122,17 +129,15 @@ lại.
 Trạng thái chi tiết (bật/tắt, đang chạy, lần cuối, lỗi kỹ thuật) xem ở
 <http://127.0.0.1:8000/health>, trong khóa `snapshot_refresh`.
 
-**Hôm demo nên tắt** (`ALLOW_ONLINE_REFRESH` không đặt): khi tắt, app **bỏ qua** file
-live kể cả khi nó tồn tại, nên số liệu đứng yên trên snapshot đã chốt suốt buổi thuyết
-trình (đề xuất B2, chờ Owner chốt). Muốn demo bằng dữ liệu mới nhất thì bật cờ một lần
-trước buổi demo, chờ `/health` báo `last_outcome: ok`, rồi chép file live sang một đường
-dẫn cố định và trỏ `SNAPSHOT_PATH` vào đó.
+Nếu provider hoặc mạng không khả dụng, app **bỏ qua lỗi và tiếp tục dùng** snapshot local
+hợp lệ gần nhất; lỗi được hiển thị trong `warnings` và trạng thái `/health`. Muốn demo
+đóng băng số liệu, đặt `ALLOW_ONLINE_REFRESH=false` trước khi khởi động app.
 
 ## 4. Kịch bản demo (khoảng 5 phút)
 
 ### Bước 1 — Mở dashboard và tải dự báo
 
-Mở <http://127.0.0.1:8000/>, bấm **"Tải dự báo snapshot"**.
+Mở <http://127.0.0.1:8000/>, bấm **"Tải dự báo mới nhất"**.
 
 Với snapshot mặc định `vn30_snapshot.csv` (30 mã VN30, dữ liệu VCI, 249 phiên/mã,
 16/10/2025 → 16/10/2026), kết quả tại thời điểm viết:
@@ -256,9 +261,9 @@ trên snapshot hiện tại cả ba mã "thận trọng" đều trên 50% nên c
 Đây là phần nhiều nhóm bỏ qua. Mở `/docs` hoặc dùng `curl`:
 
 ```bash
-# Chế độ trực tuyến chưa bật
+# Chế độ trực tuyến (mặc định, có fallback local)
 curl -i "http://127.0.0.1:8000/forecasts?mode=online"
-# -> 501 "Chế độ làm mới trực tuyến chưa được bật trong MVP."
+# -> 200; nếu refresh thất bại, response vẫn dùng snapshot local gần nhất
 
 # Chưa xác nhận
 curl -i -X POST http://127.0.0.1:8000/recommendations \
@@ -366,12 +371,10 @@ Nói ra chủ động thì là sự trung thực khoa học; để giám khảo 
    viên*, kể cả khi phần lớn tập đó có xác suất tăng dưới 50% (hiện 10/30 mã). Khi danh
    sách chứa mã dưới 50%, ứng dụng tự nêu trong phần thông báo — hãy đọc to câu đó khi
    demo. Việc có nên đặt sàn hay không thuộc Q4.
-10. **Chế độ `online` vẫn trả `501`.** Dữ liệu mới nhất từ sàn đi qua cập nhật ngầm
-   (§3.1), không qua `mode=online`: response vẫn là `mode: snapshot` vì số liệu luôn đến
-   từ một file đã ghi xong, không bao giờ từ một lần gọi sàn đang chạy. Cập nhật ngầm
-   **tắt mặc định**, và nếu một mã trả về rỗng thì cả lần cập nhật 30 mã thất bại (lỗi
-   bên `fetch_vietnam_history`, Issue #4) — app báo lỗi rồi thử lại sau. Việc giữ
-   `501` chờ Owner chốt — Q3.
+10. **Chế độ `online` là mặc định.** Dữ liệu mới nhất từ sàn được cập nhật ngầm
+   (§3.1); trong lúc chờ hoặc khi lỗi, response vẫn dùng snapshot local gần nhất.
+   Cập nhật ngầm **bật mặc định**, và nếu một mã trả về rỗng thì cả lần cập nhật 30 mã
+   thất bại (lỗi bên `fetch_vietnam_history`, Issue #4) — app báo lỗi rồi thử lại sau.
 
 ## 7. Những câu không được nói
 
