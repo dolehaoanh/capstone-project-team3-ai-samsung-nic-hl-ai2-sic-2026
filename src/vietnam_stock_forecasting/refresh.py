@@ -5,8 +5,8 @@ the latest closed trading session, one background thread fetches it through lane
 `fetch_vietnam_history` and writes the result atomically to a separate *live* file, so
 the snapshot tracked by git is never rewritten. See docs/CONTRACTS_VI.md section 4.5.
 
-Everything here is off unless ALLOW_ONLINE_REFRESH is set; the API decides that and
-passes the configuration in, so this module never reads the environment itself.
+The API enables this by default and passes the configuration in, so this module never
+reads the environment itself. Set ALLOW_ONLINE_REFRESH=false for an offline run.
 """
 
 from __future__ import annotations

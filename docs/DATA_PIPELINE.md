@@ -4,7 +4,7 @@ Tài liệu hướng dẫn kỹ thuật cho module dữ liệu thị trường (
 
 ## 1. Mục tiêu và Nguyên tắc cốt lõi
 
-- **Ưu tiên Offline-First:** Mọi quá trình huấn luyện, kiểm thử và inference đều hoạt động hoàn toàn offline với các snapshot dữ liệu được xác thực trước.
+- **Online-first khi chạy ứng dụng:** Ứng dụng thử lấy dữ liệu mới theo mặc định và giữ snapshot local hợp lệ gần nhất làm fallback; huấn luyện và kiểm thử vẫn hoạt động hoàn toàn offline với snapshot đã xác thực.
 - **Online Refresh tường minh:** Chỉ tải dữ liệu online khi người dùng hoặc developer chủ động kích hoạt qua lệnh CLI hoặc hàm `fetch_vietnam_history`.
 - **Bảo toàn Provenance & Metadata:** Mỗi snapshot dữ liệu đều được lưu kèm metadata (nguồn, thời điểm lấy, khoảng thời gian, danh sách mã cổ phiếu và số lượng dòng) để phục vụ tái lập nghiên cứu.
 - **Không Look-Ahead Leakage:** Dữ liệu lịch sử OHLCV được chuẩn hóa theo từng mốc thời gian point-in-time.

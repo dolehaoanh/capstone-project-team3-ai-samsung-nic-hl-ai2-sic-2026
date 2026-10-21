@@ -54,7 +54,6 @@ MAX_LISTED_SYMBOLS = 10
 # One refresher per process; see refresh.py for the locking rules.
 REFRESHER = SnapshotRefresher()
 
-ONLINE_DISABLED_DETAIL = "Chế độ làm mới trực tuyến chưa được bật trong MVP."
 SNAPSHOT_UNAVAILABLE_DETAIL = (
     "Không đọc được snapshot dữ liệu. Kiểm tra đường dẫn snapshot và tài liệu chạy demo."
 )
@@ -146,8 +145,9 @@ def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
 
 
 def _refresh_enabled() -> bool:
-    """Off unless asked for: tests, CI and a frozen demo must never reach the network."""
-    return _env_flag("ALLOW_ONLINE_REFRESH")
+    """Online-first by default; set ALLOW_ONLINE_REFRESH=false for an offline run."""
+    raw = os.environ.get("ALLOW_ONLINE_REFRESH")
+    return True if raw is None or not raw.strip() else _env_flag("ALLOW_ONLINE_REFRESH")
 
 
 def _refresh_config() -> RefreshConfig:
@@ -324,7 +324,7 @@ def home() -> str:
   </head>
   <body><h1>Dự báo thị trường Việt Nam</h1>
     <p class="muted">Công cụ nghiên cứu giáo dục; không đảm bảo lợi nhuận hay thay thế tư vấn tài chính.</p>
-    <button id="load">Tải dự báo snapshot</button>
+    <button id="load">Tải dự báo mới nhất</button>
     <p class="meta" id="status" role="status"></p>
     <div id="messages"></div>
     <table><caption class="muted">Bảng xếp hạng theo xác suất tăng giá trong 20 phiên tới</caption>
@@ -636,9 +636,7 @@ def _snapshot_forecasts() -> tuple[MarketSnapshot, list[Forecast], list[str]]:
 
 
 @app.get("/forecasts", response_model=ForecastResponse)
-def forecasts(mode: DataMode = DataMode.snapshot) -> ForecastResponse:
-    if mode is DataMode.online:
-        raise HTTPException(status_code=501, detail=ONLINE_DISABLED_DETAIL)
+def forecasts(mode: DataMode = DataMode.online) -> ForecastResponse:
     snapshot, items, warnings = _snapshot_forecasts()
     return ForecastResponse(
         mode=mode,

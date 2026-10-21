@@ -16,9 +16,8 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def _no_background_refresh(monkeypatch, tmp_path):
-    # A developer shell may export ALLOW_ONLINE_REFRESH; these tests must stay offline
-    # and must never write the live snapshot inside the repository.
-    monkeypatch.delenv("ALLOW_ONLINE_REFRESH", raising=False)
+    # Tests must stay offline and must never write the live snapshot inside the repository.
+    monkeypatch.setenv("ALLOW_ONLINE_REFRESH", "false")
     monkeypatch.setenv("LIVE_SNAPSHOT_PATH", str(tmp_path / "raw" / "vn30_live.csv"))
 
 
@@ -192,11 +191,13 @@ def test_snapshot_without_labelled_rows_returns_422(snapshot_env):
     assert "lịch sử" in response.json()["detail"]
 
 
-def test_online_mode_is_rejected_in_vietnamese():
+def test_online_mode_uses_the_same_fallback_safe_pipeline(snapshot_env):
+    snapshot_env()
+
     response = client.get("/forecasts", params={"mode": "online"})
 
-    assert response.status_code == 501
-    assert "trực tuyến" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["mode"] == "online"
 
 
 def test_forecasts_are_ranked_by_probability(snapshot_env):

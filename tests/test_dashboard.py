@@ -41,7 +41,7 @@ DEMO_DAY_VN = date(2026, 10, 23)
 
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch, tmp_path):
-    monkeypatch.delenv("ALLOW_ONLINE_REFRESH", raising=False)
+    monkeypatch.setenv("ALLOW_ONLINE_REFRESH", "false")
     monkeypatch.delenv("DATA_DIR", raising=False)
     monkeypatch.delenv("SNAPSHOT_STALE_DAYS", raising=False)
     monkeypatch.setenv("LIVE_SNAPSHOT_PATH", str(tmp_path / "raw" / "vn30_live.csv"))

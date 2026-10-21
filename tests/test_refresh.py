@@ -108,7 +108,7 @@ def _no_network(*args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
-    monkeypatch.delenv("ALLOW_ONLINE_REFRESH", raising=False)
+    monkeypatch.setenv("ALLOW_ONLINE_REFRESH", "false")
     monkeypatch.delenv("DATA_DIR", raising=False)
     monkeypatch.delenv("SNAPSHOT_STALE_DAYS", raising=False)
     monkeypatch.delenv("REFRESH_HISTORY_DAYS", raising=False)
@@ -260,7 +260,7 @@ def test_a_fresh_lock_blocks_and_a_stale_lock_is_cleared(tmp_path):
 # --- Through the API ----------------------------------------------------------------------
 
 
-def test_refresh_is_off_by_default_and_ignores_an_existing_live_file(monkeypatch, base, live_path):
+def test_refresh_can_be_disabled_and_ignores_an_existing_live_file(monkeypatch, base, live_path):
     fake = _install(monkeypatch, FakeFetch())
     base(retrieved_at="2024-03-20T09:00:00+00:00")  # long overdue for a refresh
     _write(live_path, _frame(periods=120), source="vnstock:LIVE", retrieved_at=_now_utc())
@@ -270,6 +270,12 @@ def test_refresh_is_off_by_default_and_ignores_an_existing_live_file(monkeypatch
     assert payload["source"] == "vnstock:VCI", "with refresh off the live file must not be read"
     assert fake.calls == []
     assert client.get("/health").json()["snapshot_refresh"]["enabled"] is False
+
+
+def test_refresh_is_enabled_when_not_configured(monkeypatch):
+    monkeypatch.delenv("ALLOW_ONLINE_REFRESH", raising=False)
+
+    assert client.get("/health").json()["snapshot_refresh"]["enabled"] is True
 
 
 def test_due_refresh_runs_in_the_background_and_the_next_request_uses_it(
