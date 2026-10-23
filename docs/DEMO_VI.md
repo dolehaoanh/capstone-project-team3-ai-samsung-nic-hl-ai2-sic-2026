@@ -22,8 +22,8 @@ Kiểm tra trước khi demo:
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-Kết quả mong đợi: **114 passed** (93 test của lane App trong `tests/test_api.py`,
-`tests/test_refresh.py` và `tests/test_dashboard.py`, còn lại của các lane Data, Features,
+Kết quả mong đợi: **165 passed** (101 test của lane App trong `tests/test_api.py`,
+`tests/test_refresh.py`, `tests/test_dashboard.py` và `tests/test_demo_numbers.py`, còn lại của các lane Data, Features,
 Modeling). Không test nào gọi mạng: hàm lấy dữ liệu được thay bằng bản giả trong mọi test
 cập nhật ngầm.
 
@@ -31,7 +31,7 @@ cập nhật ngầm.
 cần `npm install`), trên DOM giả, với response thật của API: bảng xếp hạng, tuổi dữ liệu
 theo ngày Việt Nam, thông báo lỗi `422`/`503`, chống chèn HTML, và khóa nút danh
 sách nghiên cứu cho đến khi đã tải dự báo và đánh dấu xác nhận. Máy không có Node thì 20
-test này được **bỏ qua** (kết quả `94 passed, 20 skipped`); trên CI (`CI=true`) chúng
+test này được **bỏ qua** (kết quả `145 passed, 20 skipped`); trên CI (`CI=true`) chúng
 **fail** thay vì bỏ qua. Có một warning từ `starlette`
 (`Using httpx with starlette.testclient is deprecated`) — đến từ thư viện, không phải
 code dự án, bỏ qua được.
@@ -142,6 +142,18 @@ Mở <http://127.0.0.1:8000/>, bấm **"Tải dự báo mới nhất"**.
 Với snapshot mặc định `vn30_snapshot.csv` (30 mã VN30, dữ liệu VCI, 249 phiên/mã,
 16/10/2025 → 16/10/2026), kết quả tại thời điểm viết:
 
+> **Mọi con số trong mục 4 và mục 6 đều gắn với snapshot và mô hình hiện tại.** Sau khi
+> lane Data lấy snapshot mới, hoặc lane Features/Modeling thay đổi feature, mô hình, chạy
+> lại `.venv/Scripts/python.exe scripts/demo_numbers.py` (khoảng 30 giây; thêm
+> `--skip-eval` để bỏ phần walk-forward). Script tính lại từng con số và đánh dấu ✓ nếu
+> con số đó có nguyên văn trong tài liệu này, ✗ nếu không. Sửa các đoạn có dấu ✗ trước
+> buổi diễn tập.
+>
+> Các con số này chỉ đứng yên khi app chạy offline. Từ PR #22 cập nhật ngầm **bật mặc
+> định**: máy có `vnstock` và có mạng sẽ kéo các phiên mới về `data/raw/vn30_live.csv`
+> và mọi con số bên dưới đổi theo. Muốn demo đúng số trong tài liệu này, đặt
+> `$env:ALLOW_ONLINE_REFRESH = "false"` trước khi khởi động app.
+
 | Mã | Xác suất tăng | Lợi nhuận kỳ vọng | Độ biến động | Độ tin cậy |
 |---|---|---|---|---|
 | PNJ | 73,6% | +3,37% | 4,39% | 47,2% |
@@ -164,7 +176,7 @@ Một công cụ trả về "95% chắc chắn tăng" cho mọi cổ phiếu m�
 Dòng trạng thái ngay dưới nút hiển thị:
 
 ```
-Tạo lúc: … | Chế độ: snapshot | Nguồn: vnstock:VCI | Dữ liệu: 16/10/25 → 16/10/26 (dữ liệu cách đây N ngày)
+Tạo lúc: … | Chế độ: online | Nguồn: vnstock:VCI | Dữ liệu: 16/10/25 → 16/10/26 (dữ liệu cách đây N ngày)
 ```
 
 Tuổi dữ liệu **luôn** hiện trong dòng này, tính theo ngày giờ Việt Nam, kể cả khi chưa
@@ -209,8 +221,9 @@ lại đứng số 1?"* Trả lời theo đúng dữ liệu:
 
 - **Đây là biến động thật, không phải lỗi dữ liệu.** Từ 28/09 đến 01/10/2026, PNJ có
   4 phiên liền `open = high = low = close`, mỗi phiên −7% — tức là giảm sàn, giá đi từ
-  ~38 về ~18 nghìn đồng. Không có phiên nào vượt biên độ ±7% của HOSE, nên đây không
-  phải chia tách cổ phiếu chưa điều chỉnh.
+  33,00 về 24,75 nghìn đồng. Cả đợt giảm kéo dài từ giữa tháng 9 (~38) đến 08/10
+  (~18), nên động lượng 20 phiên là −48,8%. Không có phiên nào vượt biên độ ±7% của
+  HOSE, nên đây không phải chia tách cổ phiếu chưa điều chỉnh.
 - **Con số đến từ một biến duy nhất.** Trong mô hình logistic, `return_20d` có hệ số
   lớn nhất và **âm** (−0,23 trên thang chuẩn hóa; các feature khác gần 0): mô hình học
   được rằng giảm mạnh trong 20 phiên thì dễ hồi lại. PNJ giảm 48,8% nên nhận xác suất
@@ -358,7 +371,7 @@ Nói ra chủ động thì là sự trung thực khoa học; để giám khảo 
    đây là câu trả lời thật; đừng đưa accuracy in-sample.
    Các chỉ số lợi nhuận của hàm này **không được trích dẫn** cho tới khi lane Modeling
    (Issue #5) sửa: chúng nhân dồn lợi nhuận 20 phiên chồng lấn nhau của mọi mã, nên với
-   tham số mặc định `strategy_return` ra **+438.270%** trong khi `buy_and_hold_return`
+   tham số mặc định `strategy_return` ra **+438.271%** trong khi `buy_and_hold_return`
    ra −100%. Lợi nhuận mua và giữ thực tế của rổ trong năm có trung vị −8,4%.
 6. **`target_positive` gán `0` cho phiên chưa biết tương lai** thay vì `NA`. Hiện chưa
    gây sai số vì các hàm train đều lọc thêm `forward_return`, nhưng là bẫy chờ sẵn.
